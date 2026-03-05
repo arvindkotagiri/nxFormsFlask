@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gemini Label Pro | ZPL & Analysis</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        h2 { color: #1a73e8; margin-top: 0; display: flex; align-items: center; gap: 10px; }
+        
+        .controls { background: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0; margin-bottom: 25px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        input[type="file"] { flex-grow: 1; }
+        input, select, button { padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+        
+        button.primary-btn { background: #1a73e8; color: white; border: none; cursor: pointer; font-weight: 600; padding: 10px 20px; transition: background 0.2s; }
+        button.primary-btn:hover { background: #1557b0; }
+        button.download-btn { background: #34a853; color: white; border: none; cursor: pointer; font-size: 12px; padding: 6px 12px; display: none; }
+        button.download-btn:hover { background: #2d8e47; }
+
+        #status { font-weight: 600; margin-bottom: 15px; min-height: 20px; }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .box { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; position: relative; }
+        .box h3 { margin-top: 0; font-size: 16px; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        
+        .preview-img { width: 100%; border: 1px solid #eee; margin-bottom: 15px; border-radius: 4px; min-height: 200px; background: #fafafa; object-fit: contain; }
+        pre { text-align: left; background: #2d2d2d; color: #ccc; padding: 15px; overflow-x: auto; font-size: 12px; max-height: 250px; border-radius: 6px; line-height: 1.5; }
+        
+        .json-key { color: #9cdcfe; }
+        .json-value { color: #ce9178; }
+        
+        /* Label for dropdowns */
+        .control-group { display: flex; flex-direction: column; gap: 4px; }
+        .control-group label { font-size: 12px; font-weight: bold; color: #666; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚀 Gemini Label Workstation</h2>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label>Upload Label</label>
+            <input type="file" id="imageInput" accept="image/*">
+        </div>
+
+        <div class="control-group">
+            <label>Label Size</label>
+            <select id="size">
+                <option value="4x6" selected>4" x 6"</option>
+                <option value="4x8">4" x 8"</option>
+                <option value="2x4">2" x 4"</option>
+                <option value="4x3">4" x 3"</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Print Density</label>
+            <select id="dpi">
+                <option value="152">6 dpmm (152 dpi)</option>
+                <option value="203" selected>8 dpmm (203 dpi)</option>
+                <option value="300">12 dpmm (300 dpi)</option>
+                <option value="600">24 dpmm (600 dpi)</option>
+            </select>
+        </div>
+
+        <div class="control-group" style="justify-content: flex-end;">
+            <button class="primary-btn" onclick="processLabel()">Process Label</button>
+        </div>
+    </div>
+
+    <div id="status">Ready. Upload an image to begin.</div>
+
+    <div class="grid">
+        <div class="box">
+            <h3>
+                🖨️ ZPL Printer Preview
+                <button id="dlZpl" class="download-btn" onclick="downloadData('zpl')">📥 .ZPL</button>
+            </h3>
+            <img id="zplPreview" class="preview-img" alt="ZPL Render">
+            <pre id="zplCode">ZPL commands will appear here...</pre>
+        </div>
+
+        <div class="box">
+            <h3>
+                🔍 Data Annotations
+                <button id="dlJson" class="download-btn" onclick="downloadData('json')">📥 .JSON</button>
+            </h3>
+            <img id="annotatedImage" class="preview-img" alt="AI Bounding Boxes">
+            <pre id="jsonCode">Extracted fields will appear here...</pre>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentZplData = "";
+    let currentJsonData = null;
+    let baseFileName = "label_output";
+
+    async function processLabel() {
+        const fileInput = document.getElementById('imageInput');
+        const file = fileInput.files[0];
+        const dpi = document.getElementById('dpi').value;
+        const sizeValue = document.getElementById('size').value; // e.g., "4x6"
+        const size = sizeValue.split('x');
+        const status = document.getElementById('status');
+
+        if (!file) return alert("Please select an image file.");
+        
+        baseFileName = file.name.split('.')[0];
+        status.style.color = "#1a73e8";
+        status.innerText = "⏳ Processing label... (Calling Port 5000 & 5001)";
+        
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('width', size[0]);
+        formData.append('height', size[1]);
+        formData.append('dpi', dpi);
+
+        try {
+            const [zplRes, analysisRes] = await Promise.all([
+                fetch('http://127.0.0.1:5050/generate-zpl', { method: 'POST', body: formData }),
+                fetch('http://127.0.0.1:5050/analyze-label', { method: 'POST', body: formData })
+            ]);
+
+            const zplData = await zplRes.json();
+            const analysisData = await analysisRes.json();
+
+            currentZplData = zplData.zpl_code;
+            document.getElementById('zplPreview').src = zplData.labelary_preview;
+            document.getElementById('zplCode').innerText = currentZplData;
+            document.getElementById('dlZpl').style.display = 'block';
+
+            currentJsonData = analysisData.extracted_fields;
+            document.getElementById('annotatedImage').src = analysisData.annotated_image;
+            document.getElementById('jsonCode').innerText = JSON.stringify(currentJsonData, null, 4);
+            document.getElementById('dlJson').style.display = 'block';
+
+            status.style.color = "#34a853";
+            status.innerText = "✅ Done! Results generated successfully.";
+        } catch (err) {
+            console.error(err);
+            status.style.color = "#d93025";
+            status.innerText = "❌ Connection Error. Ensure your Spyder scripts are running on Port 5000 and 5001.";
+        }
+    }
+
+    function downloadData(type) {
+        let content, filename, mimeType;
+        if (type === 'zpl') {
+            content = currentZplData;
+            filename = `${baseFileName}.zpl`;
+            mimeType = 'text/plain';
+        } else {
+            content = JSON.stringify(currentJsonData, null, 4);
+            filename = `${baseFileName}.json`;
+            mimeType = 'application/json';
+        }
+        const blob = new Blob([content], { type: mimeType });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    }
+</script>
+
+</body>
+</html>
