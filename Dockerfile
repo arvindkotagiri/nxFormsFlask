@@ -17,4 +17,9 @@ COPY . .
 
 EXPOSE 5050
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "main:app"]
+# CMD ["gunicorn", "--bind", "0.0.0.0:5050", "main:app"]
+CMD ["gunicorn", "main:app", \
+"--bind", "0.0.0.0:5050", \
+"--timeout", "180", \
+"--workers", "3", \
+"--worker-class", "gevent"]
