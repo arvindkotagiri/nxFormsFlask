@@ -135,8 +135,9 @@ analyze_bp = Blueprint("analyze", __name__)
 CORS(analyze_bp)
 
 # CONFIG
-MODEL_ID = "gemini-2.0-flash"
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_ANNOTATE"))
+# MODEL_ID = 'gemini-3-flash-preview' 
+MODEL_ID = 'gemini-1.5-pro' 
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 PROMPT_ANALYSIS = """
 Analyze this document with extreme precision.
@@ -331,3 +332,4 @@ def analyze_label():
                 "message": str(e),
             }
         ), 500
+
