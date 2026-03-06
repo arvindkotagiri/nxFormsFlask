@@ -13,8 +13,7 @@ load_dotenv()
 # CORS(app)
 zpl_bp = Blueprint('zpl', __name__)
 
-# MODEL_ID = 'gemini-3-flash-preview'
-MODEL_ID = 'gemini-1.5-flash'
+MODEL_ID = 'gemini-3-flash-preview'
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_ANNOTATE"))
 
 def clean_zpl(text):
