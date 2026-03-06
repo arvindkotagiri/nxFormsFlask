@@ -136,7 +136,7 @@ CORS(analyze_bp)
 
 # CONFIG
 # MODEL_ID = 'gemini-3-flash-preview' 
-MODEL_ID = 'gemini-1.5-pro' 
+MODEL_ID = 'gemini-1.5-flash' 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 PROMPT_ANALYSIS = """
@@ -332,4 +332,5 @@ def analyze_label():
                 "message": str(e),
             }
         ), 500
+
 
