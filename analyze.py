@@ -15,7 +15,7 @@ analyze_bp = Blueprint('analyze', __name__)
 
 # --- CONFIGURATION ---
 # MODEL_ID = 'gemini-3-flash-preview' 
-MODEL_ID = 'Gemini 3.1 Flash Lite' 
+MODEL_ID = 'gemini-1.5-flash' 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 PROMPT_ANALYSIS = """
