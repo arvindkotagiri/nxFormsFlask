@@ -19,7 +19,7 @@
 
         #status { font-weight: 600; margin-bottom: 15px; min-height: 20px; }
 
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .box { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; position: relative; }
         .box h3 { margin-top: 0; font-size: 16px; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
         
@@ -90,19 +90,54 @@
             <img id="annotatedImage" class="preview-img" alt="AI Bounding Boxes">
             <pre id="jsonCode">Extracted fields will appear here...</pre>
         </div>
+
+        <div class="box">
+            <h3>
+                🤝 HTML Template
+                <button id="dlHtml" class="download-btn" onclick="downloadData('html')">📥 .HTML</button>
+            </h3>
+            <div id="htmlPreviewContainer" style="border: 1px solid #eee; margin-bottom: 10px; border-radius: 4px; height: 250px; overflow: auto; background: #fff;">
+                <iframe id="htmlPreviewFrame" style="width: 100%; height: 100%; border: none;"></iframe>
+            </div>
+            <pre id="htmlCode">HTML template code will appear here...</pre>
+        </div>
+
+        <div class="box">
+            <h3>
+                📝 Adobe XDP Template
+                <button id="dlXdp" class="download-btn" onclick="downloadData('xdp')">📥 .XDP</button>
+            </h3>
+            <pre id="xdpCode" style="max-height: 350px;">XDP code will appear here...</pre>
+            <div style="margin-top: 10px; font-weight: bold; font-size: 13px; color: #1a73e8;">📊 Data Provider Summary:</div>
+            <pre id="xdpSummary" style="max-height: 150px; background: #fefefe; color: #444; border: 1px solid #ddd;">Summary will appear here...</pre>
+        </div>
+
+        <div class="box">
+            <h3>
+                🎯 Detected Components
+            </h3>
+            <div id="cropsContainer" style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
+                <!-- Extracted logos/signatures will appear here -->
+            </div>
+            <div style="font-size: 12px; color: #666; font-style: italic;">
+                Note: These are the exact crops from the source document used in the templates above.
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
     let currentZplData = "";
     let currentJsonData = null;
+    let currentXdpData = "";
+    let currentHtmlData = "";
     let baseFileName = "label_output";
 
     async function processLabel() {
         const fileInput = document.getElementById('imageInput');
         const file = fileInput.files[0];
         const dpi = document.getElementById('dpi').value;
-        const sizeValue = document.getElementById('size').value; // e.g., "4x6"
+        const sizeValue = document.getElementById('size').value;
         const size = sizeValue.split('x');
         const status = document.getElementById('status');
 
@@ -119,13 +154,17 @@
         formData.append('dpi', dpi);
 
         try {
-            const [zplRes, analysisRes] = await Promise.all([
+            const [zplRes, analysisRes, xdpRes, htmlRes] = await Promise.all([
                 fetch('http://127.0.0.1:5050/generate-zpl', { method: 'POST', body: formData }),
-                fetch('http://127.0.0.1:5050/analyze-label', { method: 'POST', body: formData })
+                fetch('http://127.0.0.1:5050/analyze-label', { method: 'POST', body: formData }),
+                fetch('http://127.0.0.1:5050/generate-xdp', { method: 'POST', body: formData }),
+                fetch('http://127.0.0.1:5050/replicate-invoice', { method: 'POST', body: formData })
             ]);
 
             const zplData = await zplRes.json();
             const analysisData = await analysisRes.json();
+            const xdpData = await xdpRes.json();
+            const htmlData = await htmlRes.json();
 
             currentZplData = zplData.zpl_code;
             document.getElementById('zplPreview').src = zplData.labelary_preview;
@@ -136,6 +175,35 @@
             document.getElementById('annotatedImage').src = analysisData.annotated_image;
             document.getElementById('jsonCode').innerText = JSON.stringify(currentJsonData, null, 4);
             document.getElementById('dlJson').style.display = 'block';
+
+            currentHtmlData = htmlData.full_html;
+            document.getElementById('htmlCode').innerText = currentHtmlData;
+            const iframe = document.getElementById('htmlPreviewFrame');
+            iframe.contentWindow.document.open();
+            iframe.contentWindow.document.write(htmlData.preview_html);
+            iframe.contentWindow.document.close();
+            document.getElementById('dlHtml').style.display = 'block';
+
+            // Update Crops Display
+            const cropsContainer = document.getElementById('cropsContainer');
+            cropsContainer.innerHTML = '';
+            analysisData.extracted_fields.forEach(item => {
+                if (item.content_type === 'logo' || item.content_type === 'signature') {
+                    const div = document.createElement('div');
+                    div.style = "border: 1px solid #ddd; padding: 5px; border-radius: 4px; text-align: center; background: #fff;";
+                    div.innerHTML = `
+                        <div style="font-size: 10px; font-weight: bold; margin-bottom: 4px; color: #666;">${item.content_type.toUpperCase()}</div>
+                        <img src="${item.cropped_b64}" style="max-height: 60px; max-width: 100px; display: block; margin: auto;">
+                    `;
+                    cropsContainer.appendChild(div);
+                }
+            });
+            if (cropsContainer.innerHTML === '') cropsContainer.innerHTML = '<div style="color: #999; font-style: italic; font-size: 12px;">No logo or signature detected.</div>';
+
+            currentXdpData = xdpData.xdp_code;
+            document.getElementById('xdpCode').innerText = currentXdpData;
+            document.getElementById('xdpSummary').innerText = xdpData.data_summary || 'No summary available.';
+            document.getElementById('dlXdp').style.display = 'block';
 
             status.style.color = "#34a853";
             status.innerText = "✅ Done! Results generated successfully.";
@@ -152,6 +220,14 @@
             content = currentZplData;
             filename = `${baseFileName}.zpl`;
             mimeType = 'text/plain';
+        } else if (type === 'xdp') {
+            content = currentXdpData;
+            filename = `${baseFileName}.xdp`;
+            mimeType = 'application/xml';
+        } else if (type === 'html') {
+            content = currentHtmlData;
+            filename = `${baseFileName}.html`;
+            mimeType = 'text/html';
         } else {
             content = JSON.stringify(currentJsonData, null, 4);
             filename = `${baseFileName}.json`;

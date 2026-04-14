@@ -1,4 +1,4 @@
-import os, re, base64, requests, io
+import os, re, base64, requests, io, json
 import PIL.Image
 import fitz  # PyMuPDF
 from flask import Flask, request, jsonify
@@ -75,7 +75,51 @@ def generate_zpl():
         3. For Barcodes: Use ^BC (Code 128) or ^BX (Data Matrix) as seen in image.
         4. Return ONLY the code starting with ^XA and ending with ^XZ.
         5. DO NOT include markdown or explanations.
+        6. If there is a LOGO, use the placeholder ^GF_LOGO_PLACEHOLDER.
+        7. If there is a SIGNATURE, use the placeholder ^GF_SIGNATURE_PLACEHOLDER.
+        8. If there is a LOGO, use the placeholder ^GF_LOGO_PLACEHOLDER.
+        9. If there is a SIGNATURE, use the placeholder ^GF_SIGNATURE_PLACEHOLDER.
+        10. TEMPLATING: Find dynamic fields (like names, dates, amounts, address). 
+            - Use the format {{field_name}} in the ZPL for these dynamic parts.
+            - For example: ^FD{{customer_name}}^FS
         """
+
+        def get_zpl_graphic(pil_img):
+            """Converts a PIL image to ZPL ^GF format."""
+            # Convert to 1-bit black and white (dithered)
+            pil_img = pil_img.convert("1")
+            width, height = pil_img.size
+            
+            # Width in bytes (must be multiple of 8 bits)
+            width_bytes = (width + 7) // 8
+            total_bytes = width_bytes * height
+            
+            # Convert to hex
+            hex_data = pil_img.tobytes().hex().upper()
+            
+            return f"^GFA,{total_bytes},{total_bytes},{width_bytes},{hex_data}"
+
+        def crop_parts(pil_img):
+            prompt_find = "Return JSON list of objects: {'field_name': 'logo'|'signature', 'box_2d': [ymin, xmin, ymax, xmax]}"
+            res = client.models.generate_content(
+                model=MODEL_ID,
+                contents=[prompt_find, pil_img],
+                config={'response_mime_type': 'application/json'}
+            )
+            try:
+                items = json.loads(res.text.strip())
+                crops = {}
+                w, h = pil_img.size
+                for it in items:
+                    box = it.get('box_2d')
+                    if box:
+                        ymin, xmin, ymax, xmax = box
+                        left, top = (xmin * w) / 1000, (ymin * h) / 1000
+                        right, bottom = (xmax * w) / 1000, (ymax * h) / 1000
+                        crop = pil_img.crop((left, top, right, bottom))
+                        crops[it['field_name']] = get_zpl_graphic(crop)
+                return crops
+            except: return {}
 
         # Generate content using the image (either original or converted from PDF)
         response = client.models.generate_content(
@@ -88,12 +132,43 @@ def generate_zpl():
         if not zpl_code:
             return jsonify({"error": "Gemini failed to generate ZPL"}), 500
 
-        preview_b64 = get_labelary_preview(zpl_code, width_in, height_in, dpmm)
+        # Replace placeholders
+        crops_zpl = crop_parts(pil_img)
+        if 'logo' in crops_zpl:
+            zpl_code = zpl_code.replace('^GF_LOGO_PLACEHOLDER', crops_zpl['logo'])
+        else:
+            zpl_code = zpl_code.replace('^GF_LOGO_PLACEHOLDER', '')
+            
+        if 'signature' in crops_zpl:
+            zpl_code = zpl_code.replace('^GF_SIGNATURE_PLACEHOLDER', crops_zpl['signature'])
+        else:
+            zpl_code = zpl_code.replace('^GF_SIGNATURE_PLACEHOLDER', '')
+
+        # --- MAPPING FOR PREVIEW ---
+        # We need the original values to show a real preview
+        preview_zpl = zpl_code
+        try:
+            analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
+            analysis_res = client.models.generate_content(
+                model=MODEL_ID,
+                contents=[analysis_prompt, pil_img],
+                config={'response_mime_type': 'application/json'}
+            )
+            field_data = json.loads(analysis_res.text.strip())
+            for item in field_data:
+                placeholder = "{{" + item['field_name'] + "}}"
+                if item['value']:
+                    preview_zpl = preview_zpl.replace(placeholder, str(item['value']))
+        except Exception as map_err:
+            print(f"Mapping Error: {map_err}")
+
+        preview_b64 = get_labelary_preview(preview_zpl, width_in, height_in, dpmm)
 
         return jsonify({
             "status": "success",
-            "zpl_code": zpl_code,
-            "labelary_preview": f"data:image/png;base64,{preview_b64}" if preview_b64 else None
+            "zpl_code": zpl_code, # This contains templates {{...}}
+            "labelary_preview": f"data:image/png;base64,{preview_b64}" if preview_b64 else None,
+            "preview_zpl": preview_zpl # For debug/display if needed
         })
 
     except Exception as e:
