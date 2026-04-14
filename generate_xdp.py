@@ -20,9 +20,9 @@ Task: Convert the attached document image into a valid, well-structured Adobe XD
 Instructions:
 1. Identify all labels, fields (static and dynamic), and layout structures (containers, subforms) from the image.
 2. Generate the XDP XML structure including <template>, <subform>, and field definitions (<field>).
-3. Ensure logical grouping of fields into subforms based on the visual layout.
-4. Use descriptive names for fields (snake_case or camelCase).
-5. For dynamic data, mark it clearly in the structure.
+3. For dynamic fields, use the format {{field_name}} instead of the hardcoded text in the <field> or <value> tags.
+4. Ensure logical grouping of fields into subforms based on the visual layout.
+5. Use descriptive names for fields (snake_case or camelCase).
 6. Return ONLY a JSON object: {"xdp_code": "<?xml...<xdp>...</xdp>"}
 """
 
@@ -78,9 +78,28 @@ def generate_xdp():
         if not xdp_code:
             return jsonify({"error": "No XDP code found", "raw": raw_text}), 500
 
+        # --- MAPPING FOR PREVIEW ---
+        preview_xdp = xdp_code
+        try:
+            pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
+            analysis_res = client.models.generate_content(
+                model=MODEL_ID,
+                contents=[analysis_prompt, pil_img_full],
+                config={'response_mime_type': 'application/json'}
+            )
+            field_data = json.loads(analysis_res.text.strip())
+            for item in field_data:
+                placeholder = "{{" + item['field_name'] + "}}"
+                if item['value']:
+                    preview_xdp = preview_xdp.replace(placeholder, str(item['value']))
+        except Exception as map_err:
+            print(f"Mapping Error (XDP): {map_err}")
+
         return jsonify({
             "status": "success",
-            "xdp_code": xdp_code
+            "xdp_code": xdp_code,      # Templated XDP
+            "preview_xdp": preview_xdp  # Filled XDP for display/debug
         })
 
     except Exception as e:

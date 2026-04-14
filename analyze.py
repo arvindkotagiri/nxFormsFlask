@@ -22,10 +22,15 @@ PROMPT_ANALYSIS = """
 Analyze this document with extreme precision. 
 
 Return a JSON list of objects. Each object must have:
-1. "field_name": snake_case name.
+1. "field_name": snake_case name (e.g., logo, signature, company_name, total_amount).
 2. "category": 'static' or 'dynamic'.
-3. "content_type": 'text', 'barcode', 'qrcode', or 'table'.
+3. "content_type": 'text', 'barcode', 'qrcode', 'table', 'logo', or 'signature'.
 4. "box_2d": [ymin, xmin, ymax, xmax] coordinates.
+5. "value": The original text/content seen in the image for this field.
+
+CRITICAL:
+- If you see a logo, identify it as "content_type": "logo".
+- If you see a signature, identify it as "content_type": "signature".
 
 CRITICAL INSTRUCTIONS FOR TABLES:
 - If a table is present, create ONE object with "content_type": "table".
@@ -63,6 +68,34 @@ def get_annotated_base64(pil_img, extracted_data):
     combined.convert("RGB").save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode()
 
+def crop_and_save(pil_img, box_2d, field_name):
+    width, height = pil_img.size
+    ymin, xmin, ymax, xmax = box_2d
+    left, top = (xmin * width) / 1000, (ymin * height) / 1000
+    right, bottom = (xmax * width) / 1000, (ymax * height) / 1000
+    
+    # Crop with some padding
+    padding = 5
+    left = max(0, left - padding)
+    top = max(0, top - padding)
+    right = min(width, right + padding)
+    bottom = min(height, bottom + padding)
+    
+    cropped = pil_img.crop((left, top, right, bottom))
+    
+    if not os.path.exists('static/temp'):
+        os.makedirs('static/temp')
+        
+    filename = f"{field_name}_{os.urandom(4).hex()}.png"
+    filepath = os.path.join('static/temp', filename)
+    cropped.save(filepath)
+    
+    buffered = io.BytesIO()
+    cropped.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    return filepath, f"data:image/png;base64,{img_str}"
+
 @analyze_bp.route('/analyze-label', methods=['POST'])
 def analyze_label():
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
@@ -91,6 +124,17 @@ def analyze_label():
         )
         
         extracted_data = json.loads(response.text.strip())
+        
+        # Process crops for logo and signature
+        for item in extracted_data:
+            if item.get('content_type') in ['logo', 'signature']:
+                try:
+                    filepath, b64_data = crop_and_save(pil_img, item['box_2d'], item['content_type'])
+                    item['cropped_path'] = filepath
+                    item['cropped_b64'] = b64_data
+                except Exception as crop_err:
+                    print(f"Crop Error: {crop_err}")
+
         annotated_b64 = get_annotated_base64(pil_img.copy(), extracted_data)
 
         # Generate clean base64 reference for frontend display (crucial for PDFs)
