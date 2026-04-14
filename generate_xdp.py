@@ -15,15 +15,25 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) # Using the same key 
 
 PROMPT_XDP = """
 Role: Expert Adobe Forms Architect.
+
 Task: Convert the attached document image into a valid, well-structured Adobe XDP (XML Data Package) file using XFA (XML Forms Architecture).
 
 Instructions:
 1. Identify all labels, fields (static and dynamic), and layout structures (containers, subforms) from the image.
-2. Generate the XDP XML structure including <template>, <subform>, and field definitions (<field>).
-3. For dynamic fields, use the format {{field_name}} instead of the hardcoded text in the <field> or <value> tags.
-4. Ensure logical grouping of fields into subforms based on the visual layout.
-5. Use descriptive names for fields (snake_case or camelCase).
-6. Return ONLY a JSON object: {"xdp_code": "<?xml...<xdp>...</xdp>"}
+2. Ensure logical grouping of fields into subforms based on the visual layout.
+3. Use descriptive names for fields (snake_case or camelCase).
+4. TEMPLATING: For dynamic data, use the format {{field_name}} (e.g., {{customer_name}}) clearly in the structure instead of hardcoded values.
+5. Identify 'brand_logo' [ymin, xmin, ymax, xmax].
+6. Identify 'containers' (all shaded bars, borders, or text boxes) [ymin, xmin, ymax, xmax].
+7. Extract all text elements with [ymin, xmin, ymax, xmax]. IMPORTANT: For table headers, provide a wide x-range to prevent text wrapping. If text is part of the brand_logo graphic, do not include it in text_elements.
+8. Maintain the pixel perfect coordinates of elements like boxes, text elements same as the source document.
+9. Generate the XDP XML structure including <template>, <subform>, and field definitions (<field>).
+10. Provide a summary of all the Data fields and tables to support building the data provider program.
+
+Return ONLY a JSON object: {
+    "xdp_code": "<?xml...<xdp>...</xdp>",
+    "data_summary": "Summary of fields and tables..."
+}
 """
 
 @xdp_bp.route('/generate-xdp', methods=['POST'])
@@ -99,7 +109,8 @@ def generate_xdp():
         return jsonify({
             "status": "success",
             "xdp_code": xdp_code,      # Templated XDP
-            "preview_xdp": preview_xdp  # Filled XDP for display/debug
+            "preview_xdp": preview_xdp, # Filled XDP for display/debug
+            "data_summary": data.get('data_summary', '')
         })
 
     except Exception as e:

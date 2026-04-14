@@ -107,7 +107,9 @@
                 📝 Adobe XDP Template
                 <button id="dlXdp" class="download-btn" onclick="downloadData('xdp')">📥 .XDP</button>
             </h3>
-            <pre id="xdpCode" style="max-height: 480px;">XDP code will appear here...</pre>
+            <pre id="xdpCode" style="max-height: 350px;">XDP code will appear here...</pre>
+            <div style="margin-top: 10px; font-weight: bold; font-size: 13px; color: #1a73e8;">📊 Data Provider Summary:</div>
+            <pre id="xdpSummary" style="max-height: 150px; background: #fefefe; color: #444; border: 1px solid #ddd;">Summary will appear here...</pre>
         </div>
 
         <div class="box">
@@ -200,6 +202,7 @@
 
             currentXdpData = xdpData.xdp_code;
             document.getElementById('xdpCode').innerText = currentXdpData;
+            document.getElementById('xdpSummary').innerText = xdpData.data_summary || 'No summary available.';
             document.getElementById('dlXdp').style.display = 'block';
 
             status.style.color = "#34a853";
