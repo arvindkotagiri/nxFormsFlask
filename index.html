@@ -19,7 +19,7 @@
 
         #status { font-weight: 600; margin-bottom: 15px; min-height: 20px; }
 
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
         .box { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; position: relative; }
         .box h3 { margin-top: 0; font-size: 16px; border-bottom: 2px solid #f0f2f5; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
         
@@ -90,12 +90,21 @@
             <img id="annotatedImage" class="preview-img" alt="AI Bounding Boxes">
             <pre id="jsonCode">Extracted fields will appear here...</pre>
         </div>
+
+        <div class="box">
+            <h3>
+                📝 Adobe XDP Code
+                <button id="dlXdp" class="download-btn" onclick="downloadData('xdp')">📥 .XDP</button>
+            </h3>
+            <pre id="xdpCode" style="max-height: 520px;">XDP code will appear here...</pre>
+        </div>
     </div>
 </div>
 
 <script>
     let currentZplData = "";
     let currentJsonData = null;
+    let currentXdpData = "";
     let baseFileName = "label_output";
 
     async function processLabel() {
@@ -119,13 +128,15 @@
         formData.append('dpi', dpi);
 
         try {
-            const [zplRes, analysisRes] = await Promise.all([
+            const [zplRes, analysisRes, xdpRes] = await Promise.all([
                 fetch('http://127.0.0.1:5050/generate-zpl', { method: 'POST', body: formData }),
-                fetch('http://127.0.0.1:5050/analyze-label', { method: 'POST', body: formData })
+                fetch('http://127.0.0.1:5050/analyze-label', { method: 'POST', body: formData }),
+                fetch('http://127.0.0.1:5050/generate-xdp', { method: 'POST', body: formData })
             ]);
 
             const zplData = await zplRes.json();
             const analysisData = await analysisRes.json();
+            const xdpData = await xdpRes.json();
 
             currentZplData = zplData.zpl_code;
             document.getElementById('zplPreview').src = zplData.labelary_preview;
@@ -136,6 +147,10 @@
             document.getElementById('annotatedImage').src = analysisData.annotated_image;
             document.getElementById('jsonCode').innerText = JSON.stringify(currentJsonData, null, 4);
             document.getElementById('dlJson').style.display = 'block';
+
+            currentXdpData = xdpData.xdp_code;
+            document.getElementById('xdpCode').innerText = currentXdpData;
+            document.getElementById('dlXdp').style.display = 'block';
 
             status.style.color = "#34a853";
             status.innerText = "✅ Done! Results generated successfully.";
@@ -152,6 +167,10 @@
             content = currentZplData;
             filename = `${baseFileName}.zpl`;
             mimeType = 'text/plain';
+        } else if (type === 'xdp') {
+            content = currentXdpData;
+            filename = `${baseFileName}.xdp`;
+            mimeType = 'application/xml';
         } else {
             content = JSON.stringify(currentJsonData, null, 4);
             filename = `${baseFileName}.json`;
