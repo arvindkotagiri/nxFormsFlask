@@ -10,8 +10,9 @@ from flask import Blueprint
 load_dotenv()
 xdp_bp = Blueprint('xdp', __name__)
 
-MODEL_ID = 'gemini-3.1-flash-lite-preview'
+MODEL_ID_DEFAULT = 'gemini-1.5-flash-002'
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) # Using the same key as analyze
+from settings_routes import get_model_for_process
 
 PROMPT_XDP = """
 Role: Expert Adobe Forms Architect.
@@ -38,6 +39,7 @@ Return ONLY a JSON object: {
 
 @xdp_bp.route('/generate-xdp', methods=['POST'])
 def generate_xdp():
+    model_id = get_model_for_process('xdp')
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -71,12 +73,11 @@ def generate_xdp():
         ]
 
         response = client.models.generate_content(
-            model=MODEL_ID,
+            model=model_id,
             contents=contents,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                temperature=0.0,
-                thinking_config=types.ThinkingConfig(thinking_level="high")
+                temperature=0.0
             )
         )
         
@@ -94,7 +95,7 @@ def generate_xdp():
             pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
             analysis_res = client.models.generate_content(
-                model=MODEL_ID,
+                model=model_id,
                 contents=[analysis_prompt, pil_img_full],
                 config={'response_mime_type': 'application/json'}
             )

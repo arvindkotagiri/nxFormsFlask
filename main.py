@@ -8,6 +8,8 @@ from replicate_invoice import invoice_bp
 from db_routes import db_bp
 from label_routes import label_bp
 from generate_xdp import xdp_bp
+from settings_routes import settings_bp
+
 
 def create_app():
     app = Flask(__name__)
@@ -20,6 +22,8 @@ def create_app():
     app.register_blueprint(db_bp)
     app.register_blueprint(label_bp)
     app.register_blueprint(xdp_bp)
+    app.register_blueprint(settings_bp)
+
 
     return app
 

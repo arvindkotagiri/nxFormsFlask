@@ -6,14 +6,14 @@ from google import genai
 from google.genai import types 
 from dotenv import load_dotenv
 from flask import Blueprint
+from settings_routes import get_model_for_process
 
 load_dotenv()
 # app = Flask(__name__)
 # CORS(app)
 invoice_bp = Blueprint('invoice', __name__)
 
-# MODEL_ID = 'gemini-3-flash-preview'
-MODEL_ID = 'gemini-3.1-flash-lite-preview'
+# MODEL_ID = 'gemini-1.5-flash-002'
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_INVOICE"))
 
 PROMPT_PRECISION = """
@@ -42,7 +42,7 @@ def crop_image_parts(pil_img):
     
     client_crops = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) # Using main key or similar
     res = client_crops.models.generate_content(
-        model=MODEL_ID,
+        model=get_model_for_process('invoice'),
         contents=[prompt_find_crops, pil_img],
         config={'response_mime_type': 'application/json'}
     )
@@ -74,6 +74,7 @@ def crop_image_parts(pil_img):
 
 @invoice_bp.route('/replicate-invoice', methods=['POST'])
 def replicate_invoice():
+    model_id = get_model_for_process('invoice')
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -109,12 +110,11 @@ def replicate_invoice():
         ]
 
         response = client.models.generate_content(
-            model=MODEL_ID,
+            model=model_id,
             contents=contents,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                temperature=0.0,
-                thinking_config=types.ThinkingConfig(thinking_level="high")
+                temperature=0.0
             )
         )
         
@@ -144,7 +144,7 @@ def replicate_invoice():
         try:
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
             analysis_res = client.models.generate_content(
-                model=MODEL_ID,
+                model=model_id,
                 contents=[analysis_prompt, pil_img_full],
                 config={'response_mime_type': 'application/json'}
             )
