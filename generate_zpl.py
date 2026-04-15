@@ -7,14 +7,14 @@ from google import genai
 from google.genai import types # Added for Part handling
 from dotenv import load_dotenv
 from flask import Blueprint
+from settings_routes import get_model_for_process
 
 load_dotenv()
 # app = Flask(__name__)
 # CORS(app)
 zpl_bp = Blueprint('zpl', __name__)
 
-# MODEL_ID = 'gemini-3-flash-preview'
-MODEL_ID = 'gemini-3.1-flash-lite-preview'
+# MODEL_ID = 'gemini-1.5-flash-002'
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_ANNOTATE"))
 
 def clean_zpl(text):
@@ -37,6 +37,7 @@ def get_labelary_preview(zpl_text, width_in, height_in, dpmm):
 
 @zpl_bp.route('/generate-zpl', methods=['POST'])
 def generate_zpl():
+    model_id = get_model_for_process('zpl')
     width_in = float(request.form.get('width', 4))
     height_in = float(request.form.get('height', 6))
     dpi = int(request.form.get('dpi', 203))
@@ -107,7 +108,7 @@ def generate_zpl():
         def crop_parts(pil_img):
             prompt_find = "Return JSON list of objects: {'field_name': 'logo'|'signature', 'box_2d': [ymin, xmin, ymax, xmax]}"
             res = client.models.generate_content(
-                model=MODEL_ID,
+                model=model_id,
                 contents=[prompt_find, pil_img],
                 config={'response_mime_type': 'application/json'}
             )
@@ -128,7 +129,7 @@ def generate_zpl():
 
         # Generate content using the image (either original or converted from PDF)
         response = client.models.generate_content(
-            model=MODEL_ID,
+            model=model_id,
             contents=[zpl_prompt, pil_img]
         )
         
@@ -155,7 +156,7 @@ def generate_zpl():
         try:
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
             analysis_res = client.models.generate_content(
-                model=MODEL_ID,
+                model=model_id,
                 contents=[analysis_prompt, pil_img],
                 config={'response_mime_type': 'application/json'}
             )

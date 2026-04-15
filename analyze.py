@@ -1,12 +1,12 @@
 import os, io, re, json, base64
 import PIL.Image, PIL.ImageDraw
 import fitz  # PyMuPDF
-from flask import Flask, request, jsonify
+from flask import Blueprint, request, jsonify
+from settings_routes import get_model_for_process
 from flask_cors import CORS
 from google import genai
 from google.genai import types 
 from dotenv import load_dotenv
-from flask import Blueprint
 
 load_dotenv()
 # app = Flask(__name__)
@@ -14,8 +14,7 @@ load_dotenv()
 analyze_bp = Blueprint('analyze', __name__)
 
 # --- CONFIGURATION ---
-# MODEL_ID = 'gemini-3-flash-preview'
-MODEL_ID = 'gemini-3.1-flash-lite-preview'
+MODEL_ID_DEFAULT = 'gemini-1.5-flash-002'
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 PROMPT_ANALYSIS = """
@@ -98,6 +97,7 @@ def crop_and_save(pil_img, box_2d, field_name):
 
 @analyze_bp.route('/analyze-label', methods=['POST'])
 def analyze_label():
+    model_id = get_model_for_process('analyze')
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -118,7 +118,7 @@ def analyze_label():
             doc_part = types.Part.from_bytes(data=file_bytes, mime_type="image/jpeg")
 
         response = client.models.generate_content(
-            model=MODEL_ID, 
+            model=model_id, 
             contents=[PROMPT_ANALYSIS, doc_part],
             config={'response_mime_type': 'application/json'}
         )
