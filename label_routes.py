@@ -9,8 +9,8 @@ label_bp = Blueprint("labels", __name__)
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_NAME = os.getenv("DB_NAME", "label_app")
-DB_USER = os.getenv("DB_USER", "label_app_user")
-DB_PASS = os.getenv("DB_PASS", "aravindk10")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASS = os.getenv("DB_PASS", "2914")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 
