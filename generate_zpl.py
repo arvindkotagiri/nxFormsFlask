@@ -70,9 +70,11 @@ def generate_zpl():
         5. DO NOT include markdown or explanations.
         6. If there is a LOGO, use the placeholder ^GF_LOGO_PLACEHOLDER.
         7. If there is a SIGNATURE, use the placeholder ^GF_SIGNATURE_PLACEHOLDER.
-        8. TEMPLATING: Find dynamic fields (like names, dates, amounts, address). 
-           - Use the format {{field_name}} in the ZPL for these dynamic parts.
-           - For example: ^FD{{customer_name}}^FS
+        8. If there is a LOGO, use the placeholder ^GF_LOGO_PLACEHOLDER.
+        9. If there is a SIGNATURE, use the placeholder ^GF_SIGNATURE_PLACEHOLDER.
+        10. TEMPLATING: Find dynamic fields (like names, dates, amounts, address). 
+            - Use the format {{field_name}} in the ZPL for these dynamic parts.
+            - For example: ^FD{{customer_name}}^FS
         """
 
         def get_zpl_graphic(pil_img):

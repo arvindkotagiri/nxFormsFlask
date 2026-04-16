@@ -18,8 +18,8 @@ Instructions for Images:
 - Do NOT use generic CSS for these; we will replace the placeholders.
 
 Instructions for Templating:
-- For dynamic content (customer name, dates, item descriptions, prices, totals), use the format {{field_name}} instead of the hardcoded text.
-- Example: <div class="text-xl font-bold">{{customer_name}}</div>
+- For dynamic content (customer name, dates, item descriptions, prices, totals), use the format {{fieldName}} instead of the hardcoded text.
+- Example: <div class="text-xl font-bold">{{CheckNumber}}</div>
 
 Return ONLY a JSON object: {"full_invoice_html": "<html>...</html>"}
 """
