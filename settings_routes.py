@@ -35,10 +35,13 @@ def init_settings_db():
     """)
     # Insert defaults if not exist
     defaults = {
-        'model_analyze': 'gemini-2.0-flash-lite-preview-02-05',
-        'model_zpl': 'gemini-2.0-flash-lite-preview-02-05',
-        'model_xdp': 'gemini-2.0-flash-lite-preview-02-05',
-        'model_invoice': 'gemini-2.0-flash-lite-preview-02-05'
+        'model_analyze': 'google:gemini-2.0-flash-lite',
+        'model_zpl': 'google:gemini-2.0-flash-lite',
+        'model_xdp': 'google:gemini-2.0-flash-lite',
+        'model_invoice': 'google:gemini-2.0-flash-lite',
+        'api_gemini': os.getenv("GEMINI_API_KEY", ""),
+        'api_openai': "",
+        'api_anthropic': ""
     }
     for key, val in defaults.items():
         cur.execute("INSERT INTO system_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, val))
@@ -85,36 +88,64 @@ init_settings_db()
 
 @settings_bp.route('/available-models', methods=['GET'])
 def get_available_models():
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        return jsonify({"error": "No API Key found"}), 400
+    # Helper to get setting from DB
+    def get_setting(key):
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM system_settings WHERE key = %s", (key,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            return row[0] if row else ""
+        except: return ""
+
+    gemini_key = get_setting('api_gemini') or os.getenv("GEMINI_API_KEY", "")
+    openai_key = get_setting('api_openai')
+    anthropic_key = get_setting('api_anthropic')
     
-    try:
-        client = genai.Client(api_key=api_key)
-        models = []
-        for m in client.models.list():
-            # Debug: print help(m) or dir(m) to console on first run
-            if not models:
-                print(f"DEBUG: Model object attributes: {dir(m)}")
-            
-            # Simple fallback: include it if it's gemini or has generateContent
-            methods = getattr(m, 'supported_methods', []) or getattr(m, 'supported_generation_methods', [])
-            if 'generateContent' in str(methods) or 'gemini' in m.name.lower():
-                models.append({
-                    "name": m.name,
-                    "display_name": getattr(m, 'display_name', m.name)
-                })
-        return jsonify(models)
-    except Exception as e:
-        print(f"ERROR fetching models: {e}")
-        return jsonify({"error": str(e)}), 500
+    all_models = []
+    
+    # 1. Google Gemini
+    if gemini_key:
+        try:
+            client = genai.Client(api_key=gemini_key)
+            for m in client.models.list():
+                methods = getattr(m, 'supported_methods', []) or getattr(m, 'supported_generation_methods', [])
+                if 'generateContent' in str(methods) or 'gemini' in m.name.lower():
+                    all_models.append({
+                        "name": f"google:{m.name}",
+                        "display_name": f"Google: {getattr(m, 'display_name', m.name)}",
+                        "provider": "google"
+                    })
+        except Exception as e: print(f"Gemini Fetch Error: {e}")
+
+    # 2. OpenAI (Static list for now or fetch if needed)
+    if openai_key:
+        openai_defaults = [
+            {"name": "openai:gpt-4o", "display_name": "OpenAI: GPT-4o", "provider": "openai"},
+            {"name": "openai:gpt-4o-mini", "display_name": "OpenAI: GPT-4o-mini", "provider": "openai"},
+            {"name": "openai:gpt-3.5-turbo", "display_name": "OpenAI: GPT-3.5 Turbo", "provider": "openai"},
+        ]
+        all_models.extend(openai_defaults)
+
+    # 3. Anthropic (Static list for now or fetch if needed)
+    if anthropic_key:
+        anthropic_defaults = [
+            {"name": "anthropic:claude-3-5-sonnet-latest", "display_name": "Anthropic: Claude 3.5 Sonnet", "provider": "anthropic"},
+            {"name": "anthropic:claude-3-haiku-20240307", "display_name": "Anthropic: Claude 3 Haiku", "provider": "anthropic"},
+            {"name": "anthropic:claude-3-opus-20240229", "display_name": "Anthropic: Claude 3 Opus", "provider": "anthropic"},
+        ]
+        all_models.extend(anthropic_defaults)
+
+    return jsonify(all_models)
 
 @settings_bp.route('/model-configs', methods=['GET'])
 def get_model_configs():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT key, value FROM system_settings WHERE key LIKE 'model_%'")
+        cur.execute("SELECT key, value FROM system_settings WHERE key LIKE 'model_%' OR key LIKE 'api_%'")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -129,7 +160,7 @@ def save_model_configs():
         conn = get_db_connection()
         cur = conn.cursor()
         for key, val in data.items():
-            if key.startswith('model_'):
+            if key.startswith('model_') or key.startswith('api_'):
                 cur.execute("INSERT INTO system_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, val))
         conn.commit()
         cur.close()
@@ -152,4 +183,23 @@ def get_model_for_process(process_name):
             return row[0]
     except:
         pass
-    return 'gemini-2.0-flash-lite-preview-02-05' # Final fallback
+    return 'google:gemini-2.0-flash-lite' # Final fallback
+
+def get_api_key(provider):
+    """Utility to get API key for a provider."""
+    key = f"api_{provider}"
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM system_settings WHERE key = %s", (key,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row and row[0]:
+            return row[0]
+    except:
+        pass
+    # Fallback to env for gemini if not in DB
+    if provider == 'gemini':
+        return os.getenv("GEMINI_API_KEY", "")
+    return ""

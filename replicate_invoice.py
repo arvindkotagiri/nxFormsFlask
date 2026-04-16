@@ -2,19 +2,12 @@ import os, io, json, re, PIL.Image, base64
 import fitz  # PyMuPDF
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from google import genai
-from google.genai import types 
 from dotenv import load_dotenv
 from flask import Blueprint
-from settings_routes import get_model_for_process
+from llm_utils import call_llm
 
 load_dotenv()
-# app = Flask(__name__)
-# CORS(app)
 invoice_bp = Blueprint('invoice', __name__)
-
-# MODEL_ID = 'gemini-1.5-flash-002'
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_INVOICE"))
 
 PROMPT_PRECISION = """
 Role: Expert Senior Frontend Engineer.
@@ -31,24 +24,14 @@ Instructions for Templating:
 Return ONLY a JSON object: {"full_invoice_html": "<html>...</html>"}
 """
 
-def crop_image_parts(pil_img):
-    # We use Gemini to find the boxes for logo and signature specifically
-    from google.genai import types
-    
+def crop_image_parts(pil_img, img_bytes):
     prompt_find_crops = """
     Identify the bounding boxes for 'logo' and 'signature' in this document.
     Return a JSON list of objects: {"field_name": "logo"|"signature", "box_2d": [ymin, xmin, ymax, xmax]}
     """
-    
-    client_crops = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) # Using main key or similar
-    res = client_crops.models.generate_content(
-        model=get_model_for_process('invoice'),
-        contents=[prompt_find_crops, pil_img],
-        config={'response_mime_type': 'application/json'}
-    )
-    
     try:
-        items = json.loads(res.text.strip())
+        res = call_llm(process_name='invoice', prompt=prompt_find_crops, image_bytes=img_bytes, response_mime_type="application/json")
+        items = json.loads(res)
     except:
         return {}
 
@@ -62,7 +45,6 @@ def crop_image_parts(pil_img):
             left, top = (xmin * width) / 1000, (ymin * height) / 1000
             right, bottom = (xmax * width) / 1000, (ymax * height) / 1000
             
-            # Add padding
             p = 10
             cropped = pil_img.crop((max(0, left-p), max(0, top-p), min(width, right+p), min(height, bottom+p)))
             
@@ -74,97 +56,68 @@ def crop_image_parts(pil_img):
 
 @invoice_bp.route('/replicate-invoice', methods=['POST'])
 def replicate_invoice():
-    model_id = get_model_for_process('invoice')
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
         file_bytes = file.read()
         filename = file.filename.lower()
 
-        # --- PDF TO IMAGE CONVERSION ---
         if filename.endswith('.pdf'):
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            page = doc.load_page(0)  # Replicating the first page layout
-            # Use a high matrix for "pixel-perfect" detail
+            page = doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) 
             img_bytes = pix.tobytes("jpeg")
             doc.close()
         else:
-            # Handle standard Image
             img_byte_arr = io.BytesIO()
             PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB").save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
 
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(text=PROMPT_PRECISION),
-                    types.Part.from_bytes(
-                        data=img_bytes, 
-                        mime_type="image/jpeg",
-                        media_resolution="media_resolution_ultra_high" 
-                    )
-                ]
-            )
-        ]
-
-        response = client.models.generate_content(
-            model=model_id,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            )
+        # Generate HTML
+        raw_response = call_llm(
+            process_name='invoice',
+            prompt=PROMPT_PRECISION,
+            image_bytes=img_bytes,
+            response_mime_type="application/json"
         )
-        
-        raw_text = response.text.strip()
-        data = json.loads(raw_text)
+        data = json.loads(raw_response)
 
-        # Extraction logic
-        if isinstance(data, list):
-            html_content = data[0].get('full_invoice_html', '')
-        else:
-            html_content = data.get('full_invoice_html', '')
+        if isinstance(data, list): html_content = data[0].get('full_invoice_html', '')
+        else: html_content = data.get('full_invoice_html', '')
 
         if not html_content:
-            return jsonify({"error": "No HTML found", "raw": raw_text}), 500
+            return jsonify({"error": "No HTML found", "raw": raw_response}), 500
 
-        # Now handle the crops and replacement
+        # Handle crops
         pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        crops = crop_image_parts(pil_img_full)
+        crops = crop_image_parts(pil_img_full, img_bytes)
         
         if 'logo' in crops:
             html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{crops['logo']}")
         if 'signature' in crops:
             html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{crops['signature']}")
 
-        # --- MAPPING FOR PREVIEW ---
+        # Mapping for preview
         preview_html = html_content
         try:
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
-            analysis_res = client.models.generate_content(
-                model=model_id,
-                contents=[analysis_prompt, pil_img_full],
-                config={'response_mime_type': 'application/json'}
-            )
-            field_data = json.loads(analysis_res.text.strip())
+            analysis_res = call_llm(process_name='invoice', prompt=analysis_prompt, image_bytes=img_bytes, response_mime_type="application/json")
+            field_data = json.loads(analysis_res)
+            if isinstance(field_data, dict) and "fields" in field_data: field_data = field_data["fields"]
+            
             for item in field_data:
                 placeholder = "{{" + item['field_name'] + "}}"
                 if item['value']:
                     preview_html = preview_html.replace(placeholder, str(item['value']))
         except Exception as map_err:
-            print(f"Mapping Error: {map_err}")
+            print(f"Mapping Error (Invoice): {map_err}")
 
         return jsonify({
             "status": "success",
-            "full_html": html_content,      # Templated HTML
-            "preview_html": preview_html    # Filled HTML for preview
+            "full_html": html_content,
+            "preview_html": preview_html
         })
 
     except Exception as e:
-        print(f"CRITICAL ERROR: {str(e)}")
+        print(f"CRITICAL ERROR (Invoice): {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-# if __name__ == '__main__':
-#     app.run(port=5052, debug=False, threaded=True)
