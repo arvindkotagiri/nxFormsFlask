@@ -2,20 +2,11 @@ import os, io, re, json, base64
 import PIL.Image, PIL.ImageDraw
 import fitz  # PyMuPDF
 from flask import Blueprint, request, jsonify
-from settings_routes import get_model_for_process
-from flask_cors import CORS
-from google import genai
-from google.genai import types 
 from dotenv import load_dotenv
+from llm_utils import call_llm
 
 load_dotenv()
-# app = Flask(__name__)
-# CORS(app)
 analyze_bp = Blueprint('analyze', __name__)
-
-# --- CONFIGURATION ---
-MODEL_ID_DEFAULT = 'gemini-1.5-flash-002'
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 PROMPT_ANALYSIS = """
 Analyze this document with extreme precision. 
@@ -73,7 +64,6 @@ def crop_and_save(pil_img, box_2d, field_name):
     left, top = (xmin * width) / 1000, (ymin * height) / 1000
     right, bottom = (xmax * width) / 1000, (ymax * height) / 1000
     
-    # Crop with some padding
     padding = 5
     left = max(0, left - padding)
     top = max(0, top - padding)
@@ -97,7 +87,6 @@ def crop_and_save(pil_img, box_2d, field_name):
 
 @analyze_bp.route('/analyze-label', methods=['POST'])
 def analyze_label():
-    model_id = get_model_for_process('analyze')
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -105,27 +94,33 @@ def analyze_label():
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
-            # --- PyMuPDF conversion (No Poppler Required) ---
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             page = doc.load_page(0)  
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) # High-res zoom
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
             img_data = pix.tobytes("png")
             pil_img = PIL.Image.open(io.BytesIO(img_data)).convert("RGB")
             doc.close()
-            doc_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+            llm_img_bytes = img_data
         else:
             pil_img = PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB")
-            doc_part = types.Part.from_bytes(data=file_bytes, mime_type="image/jpeg")
+            llm_img_bytes = file_bytes
 
-        response = client.models.generate_content(
-            model=model_id, 
-            contents=[PROMPT_ANALYSIS, doc_part],
-            config={'response_mime_type': 'application/json'}
+        # --- Generate Content using Unified LLM Caller ---
+        raw_response = call_llm(
+            process_name='analyze',
+            prompt=PROMPT_ANALYSIS,
+            image_bytes=llm_img_bytes,
+            response_mime_type="application/json"
         )
         
-        extracted_data = json.loads(response.text.strip())
+        extracted_data = json.loads(raw_response)
         
-        # Process crops for logo and signature
+        # In case the model returns the list direct or in a wrapper
+        if isinstance(extracted_data, dict) and "fields" in extracted_data:
+            extracted_data = extracted_data["fields"]
+        elif isinstance(extracted_data, dict) and "data" in extracted_data:
+            extracted_data = extracted_data["data"]
+
         for item in extracted_data:
             if item.get('content_type') in ['logo', 'signature']:
                 try:
@@ -137,7 +132,6 @@ def analyze_label():
 
         annotated_b64 = get_annotated_base64(pil_img.copy(), extracted_data)
 
-        # Generate clean base64 reference for frontend display (crucial for PDFs)
         clean_buffered = io.BytesIO()
         pil_img.save(clean_buffered, format="PNG")
         clean_b64 = base64.b64encode(clean_buffered.getvalue()).decode()
@@ -151,6 +145,3 @@ def analyze_label():
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
-
-# if __name__ == '__main__':
-#     app.run(port=5050, debug=False, threaded=True)

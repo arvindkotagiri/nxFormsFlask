@@ -45,7 +45,8 @@ def get_labels():
                 created_by,
                 created_on,
                 page_dimensions,
-                output_mode
+                output_mode,
+                xdp_code
             FROM label_master
             ORDER BY created_on DESC;
         """

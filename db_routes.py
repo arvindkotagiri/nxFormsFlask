@@ -43,6 +43,7 @@ def save_label():
         bar_code_type = data.get('bar_code_type', '')
         zpl_code = data.get('zpl_code', '')
         html_code = data.get('html_code','')
+        xdp_code = data.get('xdp_code', '')
         page_dimensions = data.get('page_dimensions', '')
         output_mode = data.get('output_mode', '')
         # Ensure fields is a list/JSON array
@@ -59,9 +60,9 @@ def save_label():
                 label_id, label_name, context, field_mapping, 
                 bar_code_type, zpl_code, fields, version, 
                 created_by, created_on,
-                html_code, page_dimensions, output_mode
+                html_code, page_dimensions, output_mode, xdp_code
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING uuid;
         """
 
@@ -69,7 +70,7 @@ def save_label():
             label_id, label_name, context, field_mapping,
             bar_code_type, zpl_code, fields, version,
             created_by, created_on,
-            html_code, page_dimensions, output_mode
+            html_code, page_dimensions, output_mode, xdp_code
         ))
 
         new_uuid = cur.fetchone()[0]
