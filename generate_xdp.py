@@ -2,17 +2,12 @@ import os, io, json, re, PIL.Image
 import fitz  # PyMuPDF
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from google import genai
-from google.genai import types 
 from dotenv import load_dotenv
 from flask import Blueprint
+from llm_utils import call_llm
 
 load_dotenv()
 xdp_bp = Blueprint('xdp', __name__)
-
-MODEL_ID_DEFAULT = 'gemini-1.5-flash-002'
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) # Using the same key as analyze
-from settings_routes import get_model_for_process
 
 PROMPT_XDP = """
 Role: Expert Adobe Forms Architect.
@@ -39,14 +34,12 @@ Return ONLY a JSON object: {
 
 @xdp_bp.route('/generate-xdp', methods=['POST'])
 def generate_xdp():
-    model_id = get_model_for_process('xdp')
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
         file_bytes = file.read()
         filename = file.filename.lower()
 
-        # --- PDF TO IMAGE CONVERSION ---
         if filename.endswith('.pdf'):
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             page = doc.load_page(0)
@@ -58,48 +51,27 @@ def generate_xdp():
             PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB").save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
 
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(text=PROMPT_XDP),
-                    types.Part.from_bytes(
-                        data=img_bytes, 
-                        mime_type="image/jpeg",
-                        media_resolution="media_resolution_ultra_high" 
-                    )
-                ]
-            )
-        ]
-
-        response = client.models.generate_content(
-            model=model_id,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            )
+        # Generate XDP
+        raw_response = call_llm(
+            process_name='xdp',
+            prompt=PROMPT_XDP,
+            image_bytes=img_bytes,
+            response_mime_type="application/json"
         )
-        
-        raw_text = response.text.strip()
-        data = json.loads(raw_text)
-
+        data = json.loads(raw_response)
         xdp_code = data.get('xdp_code', '')
 
         if not xdp_code:
-            return jsonify({"error": "No XDP code found", "raw": raw_text}), 500
+            return jsonify({"error": "No XDP code found", "raw": raw_response}), 500
 
-        # --- MAPPING FOR PREVIEW ---
+        # Mapping for preview
         preview_xdp = xdp_code
         try:
-            pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
-            analysis_res = client.models.generate_content(
-                model=model_id,
-                contents=[analysis_prompt, pil_img_full],
-                config={'response_mime_type': 'application/json'}
-            )
-            field_data = json.loads(analysis_res.text.strip())
+            analysis_res = call_llm(process_name='xdp', prompt=analysis_prompt, image_bytes=img_bytes, response_mime_type="application/json")
+            field_data = json.loads(analysis_res)
+            if isinstance(field_data, dict) and "fields" in field_data: field_data = field_data["fields"]
+            
             for item in field_data:
                 placeholder = "{{" + item['field_name'] + "}}"
                 if item['value']:
@@ -109,8 +81,8 @@ def generate_xdp():
 
         return jsonify({
             "status": "success",
-            "xdp_code": xdp_code,      # Templated XDP
-            "preview_xdp": preview_xdp, # Filled XDP for display/debug
+            "xdp_code": xdp_code,
+            "preview_xdp": preview_xdp,
             "data_summary": data.get('data_summary', '')
         })
 
