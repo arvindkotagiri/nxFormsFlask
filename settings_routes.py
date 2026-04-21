@@ -97,9 +97,10 @@ def _build_models_list(gemini_key, openai_key, anthropic_key):
             for m in client.models.list():
                 methods = getattr(m, 'supported_methods', []) or getattr(m, 'supported_generation_methods', [])
                 if 'generateContent' in str(methods) or 'gemini' in m.name.lower():
+                    short_name = m.name.replace("models/", "")
                     all_models.append({
-                        "name": f"google:{m.name}",
-                        "display_name": f"Google: {getattr(m, 'display_name', m.name)}",
+                        "name": f"google:{short_name}",
+                        "display_name": f"Google: {getattr(m, 'display_name', short_name)}",
                         "provider": "google"
                     })
         except Exception as e:

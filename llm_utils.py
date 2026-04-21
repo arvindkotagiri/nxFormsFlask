@@ -15,7 +15,14 @@ def call_llm(process_name, prompt, system_instruction=None, image_bytes=None, re
     else:
         provider, model_id = model_config.split(":", 1)
 
-    api_key = get_api_key(provider)
+    provider_key_map = {
+            "google": "gemini",
+            "openai": "openai",
+            "anthropic": "anthropic"
+        }
+    api_key = get_api_key(provider_key_map.get(provider, provider))
+
+    # api_key = get_api_key(provider)
     if not api_key:
         raise ValueError(f"No API key configured for provider: {provider}")
 
