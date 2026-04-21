@@ -86,26 +86,10 @@ def init_settings_db():
 # Initialize on import
 init_settings_db()
 
-@settings_bp.route('/available-models', methods=['GET'])
-def get_available_models():
-    # Helper to get setting from DB
-    def get_setting(key):
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT value FROM system_settings WHERE key = %s", (key,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            return row[0] if row else ""
-        except: return ""
-
-    gemini_key = get_setting('api_gemini') or os.getenv("GEMINI_API_KEY", "")
-    openai_key = get_setting('api_openai')
-    anthropic_key = get_setting('api_anthropic')
-    
+def _build_models_list(gemini_key, openai_key, anthropic_key):
+    """Build a list of available models given API keys."""
     all_models = []
-    
+
     # 1. Google Gemini
     if gemini_key:
         try:
@@ -118,27 +102,45 @@ def get_available_models():
                         "display_name": f"Google: {getattr(m, 'display_name', m.name)}",
                         "provider": "google"
                     })
-        except Exception as e: print(f"Gemini Fetch Error: {e}")
+        except Exception as e:
+            print(f"Gemini Fetch Error: {e}")
 
-    # 2. OpenAI (Static list for now or fetch if needed)
+    # 2. OpenAI (static list)
     if openai_key:
-        openai_defaults = [
+        all_models.extend([
             {"name": "openai:gpt-4o", "display_name": "OpenAI: GPT-4o", "provider": "openai"},
             {"name": "openai:gpt-4o-mini", "display_name": "OpenAI: GPT-4o-mini", "provider": "openai"},
             {"name": "openai:gpt-3.5-turbo", "display_name": "OpenAI: GPT-3.5 Turbo", "provider": "openai"},
-        ]
-        all_models.extend(openai_defaults)
+        ])
 
-    # 3. Anthropic (Static list for now or fetch if needed)
+    # 3. Anthropic (static list)
     if anthropic_key:
-        anthropic_defaults = [
+        all_models.extend([
             {"name": "anthropic:claude-3-5-sonnet-latest", "display_name": "Anthropic: Claude 3.5 Sonnet", "provider": "anthropic"},
             {"name": "anthropic:claude-3-haiku-20240307", "display_name": "Anthropic: Claude 3 Haiku", "provider": "anthropic"},
             {"name": "anthropic:claude-3-opus-20240229", "display_name": "Anthropic: Claude 3 Opus", "provider": "anthropic"},
-        ]
-        all_models.extend(anthropic_defaults)
+        ])
 
-    return jsonify(all_models)
+    return all_models
+
+
+@settings_bp.route('/available-models', methods=['GET'])
+def get_available_models():
+    """Fetch available models using API keys stored in DB (or env fallback)."""
+    gemini_key = get_api_key('gemini') or os.getenv("GEMINI_API_KEY", "")
+    openai_key = get_api_key('openai')
+    anthropic_key = get_api_key('anthropic')
+    return jsonify(_build_models_list(gemini_key, openai_key, anthropic_key))
+
+
+@settings_bp.route('/available-models', methods=['POST'])
+def preview_available_models():
+    """Fetch available models using API keys provided in request body (live preview, no DB save)."""
+    data = request.json or {}
+    gemini_key = data.get('api_gemini') or get_api_key('gemini') or os.getenv("GEMINI_API_KEY", "")
+    openai_key = data.get('api_openai') or get_api_key('openai')
+    anthropic_key = data.get('api_anthropic') or get_api_key('anthropic')
+    return jsonify(_build_models_list(gemini_key, openai_key, anthropic_key))
 
 @settings_bp.route('/model-configs', methods=['GET'])
 def get_model_configs():
