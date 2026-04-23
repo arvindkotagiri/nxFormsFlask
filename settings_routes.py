@@ -189,7 +189,12 @@ def get_model_for_process(process_name):
 
 def get_api_key(provider):
     """Utility to get API key for a provider."""
-    key = f"api_{provider}"
+    # Normalize provider name: 'google' models use 'api_gemini' key in DB
+    lookup_provider = provider
+    if provider == 'google':
+        lookup_provider = 'gemini'
+        
+    key = f"api_{lookup_provider}"
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -201,7 +206,8 @@ def get_api_key(provider):
             return row[0]
     except:
         pass
-    # Fallback to env for gemini if not in DB
-    if provider == 'gemini':
+        
+    # Fallback to env for gemini/google if not in DB
+    if lookup_provider == 'gemini':
         return os.getenv("GEMINI_API_KEY", "")
     return ""

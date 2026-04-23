@@ -17,7 +17,7 @@ def call_llm(process_name, prompt, system_instruction=None, image_bytes=None, re
 
     api_key = get_api_key(provider)
     if not api_key:
-        raise ValueError(f"No API key configured for provider: {provider}")
+        raise ValueError(f"No API key configured for provider: {provider}. Please set it in the Settings -> AI Models tab.")
 
     if provider == "google":
         return call_gemini(model_id, api_key, prompt, system_instruction, image_bytes, response_mime_type)
