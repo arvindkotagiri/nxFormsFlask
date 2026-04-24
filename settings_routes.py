@@ -115,11 +115,13 @@ def _build_models_list(gemini_key, openai_key, anthropic_key):
         ])
 
     # 3. Anthropic (static list)
+    # 3. Anthropic (static list)
     if anthropic_key:
         all_models.extend([
-            {"name": "anthropic:claude-3-5-sonnet-latest", "display_name": "Anthropic: Claude 3.5 Sonnet", "provider": "anthropic"},
-            {"name": "anthropic:claude-3-haiku-20240307", "display_name": "Anthropic: Claude 3 Haiku", "provider": "anthropic"},
-            {"name": "anthropic:claude-3-opus-20240229", "display_name": "Anthropic: Claude 3 Opus", "provider": "anthropic"},
+            {"name": "anthropic:claude-sonnet-4-6", "display_name": "Anthropic: Claude Sonnet 4.6", "provider": "anthropic"},
+            {"name": "anthropic:claude-opus-4-6", "display_name": "Anthropic: Claude Opus 4.6", "provider": "anthropic"},
+            {"name": "anthropic:claude-haiku-4-5-20251001", "display_name": "Anthropic: Claude Haiku 4.5", "provider": "anthropic"},
+            {"name": "anthropic:claude-sonnet-4-20250514", "display_name": "Anthropic: Claude Sonnet 4 (stable)", "provider": "anthropic"},
         ])
 
     return all_models
