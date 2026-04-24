@@ -9,6 +9,7 @@ from db_routes import db_bp
 from label_routes import label_bp
 from generate_xdp import xdp_bp
 from settings_routes import settings_bp
+from printer_routes import printer_bp
 
 
 def create_app():
@@ -23,6 +24,7 @@ def create_app():
     app.register_blueprint(label_bp)
     app.register_blueprint(xdp_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(printer_bp, url_prefix='/api')
 
 
     return app
