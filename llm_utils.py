@@ -162,7 +162,7 @@ def call_llm(process_name, prompt, system_instruction=None, image_bytes=None, re
     api_key = get_api_key(provider_key_map.get(provider, provider))
 
     if not api_key:
-        raise ValueError(f"No API key configured for provider: {provider}")
+        raise ValueError(f"No API key configured for provider: {provider}. Please set it in the Settings -> AI Models tab.")
 
     # Detect media type once here, pass it to all providers
     media_type = detect_media_type(image_bytes) if image_bytes else "image/png"
