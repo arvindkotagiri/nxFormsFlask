@@ -19,6 +19,49 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("DB_PASS", "2914")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
+@db_bp.route('/init-labels-db', methods=['POST'])
+def init_labels_db():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Create label_master if it doesn't exist
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS label_master (
+                uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                label_id VARCHAR(50),
+                label_name VARCHAR(255),
+                context TEXT,
+                field_mapping JSONB,
+                bar_code_type VARCHAR(50),
+                zpl_code TEXT,
+                html_code TEXT,
+                fields JSONB,
+                version NUMERIC,
+                created_by VARCHAR(100),
+                created_on TIMESTAMP,
+                page_dimensions VARCHAR(50),
+                output_mode VARCHAR(20)
+            );
+        """)
+        
+        # Add xdp_code if missing
+        cur.execute("""
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='label_master' AND column_name='xdp_code') THEN
+                    ALTER TABLE label_master ADD COLUMN xdp_code TEXT;
+                END IF;
+            END $$;
+        """)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"status": "success", "message": "Label table schema updated"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 def get_db_connection():
     conn = psycopg2.connect(
         host=DB_HOST,

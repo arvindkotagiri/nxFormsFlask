@@ -10,11 +10,12 @@ from label_routes import label_bp
 from generate_xdp import xdp_bp
 from settings_routes import settings_bp
 from printer_routes import printer_bp
+from api_master_routes import api_master_bp
 
 
 def create_app():
     app = Flask(__name__)
-    CORS(app)
+    CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
     # Register Blueprints
     app.register_blueprint(analyze_bp)
@@ -25,6 +26,7 @@ def create_app():
     app.register_blueprint(xdp_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(printer_bp, url_prefix='/api')
+    app.register_blueprint(api_master_bp, url_prefix='/api')
 
 
     return app

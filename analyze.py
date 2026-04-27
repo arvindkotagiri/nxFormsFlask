@@ -26,8 +26,8 @@ CRITICAL INSTRUCTIONS FOR TABLES:
 - If a table is present, create ONE object with "content_type": "table".
 - The "box_2d" must encompass the ENTIRE table area.
 - Inside this object, add "table_data": a list of rows.
-- Each row should be an object where each cell is another object containing:
-  {"value": "the_text", "category": "static" or "dynamic"}
+- Each row MUST be a LIST of cell objects (consistent column order).
+- Each cell: {"value": "the_text", "category": "static" or "dynamic"}
 """
 
 def get_annotated_base64(pil_img, extracted_data):
@@ -87,6 +87,7 @@ def crop_and_save(pil_img, box_2d, field_name):
 
 @analyze_bp.route('/analyze-label', methods=['POST'])
 def analyze_label():
+    print("--- ANALYSIS STARTING: File Received ---")
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
