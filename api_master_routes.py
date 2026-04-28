@@ -144,7 +144,7 @@ def fetch_metadata():
     try:
         # In a real scenario, you might need OAuth here.
         # For now, let's try a simple GET.
-        response = requests.get(metadata_url, verify=False, timeout=10)
+        response = requests.get(metadata_url, verify=True, timeout=10)
         if response.status_code != 200:
             return jsonify({"status": "error", "message": f"Failed to fetch metadata: {response.status_code}"}), response.status_code
         
