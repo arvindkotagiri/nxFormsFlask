@@ -228,12 +228,19 @@ def fetch_metadata():
             name = entity_type.get('Name')
             fields = []
             
+            # Find keys
+            key_names = set()
+            for key in entity_type.findall('.//{*}Key/{*}PropertyRef'):
+                key_names.add(key.get('Name'))
+            
             # Find properties
             for prop in entity_type.findall('.//{*}Property'):
+                prop_name = prop.get('Name')
                 fields.append({
-                    "name": prop.get('Name'),
+                    "name": prop_name,
                     "type": prop.get('Type'),
-                    "label": prop.get('{http://www.sap.com/Protocols/SAPData}label') or prop.get('Name')
+                    "label": prop.get('{http://www.sap.com/Protocols/SAPData}label') or prop_name,
+                    "isKey": prop_name in key_names
                 })
             
             # Find navigation properties
