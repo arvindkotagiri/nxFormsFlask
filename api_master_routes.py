@@ -36,9 +36,18 @@ def init_api_db():
                 client_secret TEXT,
                 fields JSONB,
                 entities JSONB,
+                username TEXT,
+                password TEXT,
                 status TEXT DEFAULT 'Active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+        """)
+        
+        # Add columns if they don't exist (for existing tables)
+        cur.execute("""
+            ALTER TABLE contexts 
+            ADD COLUMN IF NOT EXISTS username TEXT,
+            ADD COLUMN IF NOT EXISTS password TEXT;
         """)
         conn.commit()
         return jsonify({"status": "success", "message": "Contexts table initialized"})
@@ -66,8 +75,8 @@ def add_api():
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO contexts (name, endpoint, auth_type, client_id, client_secret, fields, entities)
-            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+            INSERT INTO contexts (name, endpoint, auth_type, client_id, client_secret, fields, entities, username, password)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
         """, (
             data['name'], 
             data['endpoint'], 
@@ -75,7 +84,9 @@ def add_api():
             data.get('client_id'), 
             data.get('client_secret'),
             psycopg2.extras.Json(data.get('fields', [])),
-            psycopg2.extras.Json(data.get('entities', []))
+            psycopg2.extras.Json(data.get('entities', [])),
+            data.get('username'),
+            data.get('password')
         ))
         api_id = cur.fetchone()[0]
         conn.commit()
@@ -95,7 +106,7 @@ def update_api(api_id):
     try:
         cur.execute("""
             UPDATE contexts 
-            SET name = %s, endpoint = %s, auth_type = %s, client_id = %s, client_secret = %s, fields = %s, entities = %s
+            SET name = %s, endpoint = %s, auth_type = %s, client_id = %s, client_secret = %s, fields = %s, entities = %s, username = %s, password = %s
             WHERE id = %s
         """, (
             data['name'], 
@@ -105,6 +116,8 @@ def update_api(api_id):
             data.get('client_secret'),
             psycopg2.extras.Json(data.get('fields', [])),
             psycopg2.extras.Json(data.get('entities', [])),
+            data.get('username'),
+            data.get('password'),
             api_id
         ))
         conn.commit()
@@ -135,6 +148,13 @@ def delete_api(api_id):
 def fetch_metadata():
     data = request.json
     url = data.get('url')
+    token_url = data.get('tokenUrl')
+    client_id = data.get('clientId')
+    client_secret = data.get('clientSecret')
+    auth_type = data.get('authType', 'OAuth2')
+    username = data.get('username')
+    password = data.get('password')
+
     if not url:
         return jsonify({"status": "error", "message": "URL is required"}), 400
     
@@ -142,11 +162,56 @@ def fetch_metadata():
     metadata_url = url if url.endswith('$metadata') else (url if url.endswith('/') else url + '/') + '$metadata'
     
     try:
-        # In a real scenario, you might need OAuth here.
-        # For now, let's try a simple GET.
-        response = requests.get(metadata_url, verify=True, timeout=10)
+        headers = {}
+        auth = None
+        # Fetch OAuth token if auth details are provided
+        if auth_type == 'OAuth2' and token_url and client_id and client_secret:
+            print(f"[FETCH_METADATA] Requesting token from {token_url}")
+            auth_response = requests.post(
+                token_url,
+                data={
+                    'grant_type': 'client_credentials',
+                    'client_id': client_id,
+                    'client_secret': client_secret
+                },
+                auth=(client_id, client_secret),
+                verify=False,
+                timeout=10
+            )
+            
+            if auth_response.status_code != 200:
+                print(f"[FETCH_METADATA] Auth Failed. Status code: {auth_response.status_code}. Response: {auth_response.text}")
+                return jsonify({
+                    "status": "error", 
+                    "message": f"OAuth Authentication failed (Status {auth_response.status_code})"
+                }), 401
+                
+            token_data = auth_response.json()
+            access_token = token_data.get('access_token')
+            if access_token:
+                print(f"[FETCH_METADATA] Got token successfully! Length: {len(access_token)}")
+                headers['Authorization'] = f'Bearer {access_token}'
+        elif auth_type == 'Basic' and username and password:
+            print(f"[FETCH_METADATA] Using Basic Auth for {username}")
+            auth = (username, password)
+
+        print(f"[FETCH_METADATA] Requesting OData metadata from {metadata_url} with headers {list(headers.keys())}")
+        response = requests.get(metadata_url, headers=headers, auth=auth, verify=False, timeout=10)
+        print(f"[FETCH_METADATA] Metadata Response Status: {response.status_code}")
+        
+        if response.status_code == 404:
+            print("[FETCH_METADATA] Metadata returned 404. Testing base URL to see if it's reachable...")
+            base_check = requests.get(url, headers=headers, auth=auth, verify=False, timeout=5)
+            if base_check.status_code == 200:
+                 return jsonify({"status": "error", "message": f"Connected successfully via Token, but $metadata endpoint is missing (404) at the provided Service Endpoint. Please check if your CAP service exposes $metadata. Base URL returned: 200 OK."}), 404
+            elif base_check.status_code == 401:
+                 return jsonify({"status": "error", "message": f"Connected, but token was rejected by the service (401 Unauthorized). Please check your credentials and token scopes."}), 401
+            else:
+                 return jsonify({"status": "error", "message": f"Service Endpoint returned {base_check.status_code} and $metadata returned 404. Ensure you provided the exact valid OData V4 Service Endpoint."}), 404
+
         if response.status_code != 200:
-            return jsonify({"status": "error", "message": f"Failed to fetch metadata: {response.status_code}"}), response.status_code
+            print(f"[FETCH_METADATA] Metadata Fetch Failed. Output: {response.text[:200]}")
+            return jsonify({"status": "error", "message": f"Failed to fetch metadata (Status {response.status_code}): {response.text[:100]}"}), response.status_code
         
         # Parse XML
         root = ET.fromstring(response.content)
@@ -163,12 +228,19 @@ def fetch_metadata():
             name = entity_type.get('Name')
             fields = []
             
+            # Find keys
+            key_names = set()
+            for key in entity_type.findall('.//{*}Key/{*}PropertyRef'):
+                key_names.add(key.get('Name'))
+            
             # Find properties
             for prop in entity_type.findall('.//{*}Property'):
+                prop_name = prop.get('Name')
                 fields.append({
-                    "name": prop.get('Name'),
+                    "name": prop_name,
                     "type": prop.get('Type'),
-                    "label": prop.get('{http://www.sap.com/Protocols/SAPData}label') or prop.get('Name')
+                    "label": prop.get('{http://www.sap.com/Protocols/SAPData}label') or prop_name,
+                    "isKey": prop_name in key_names
                 })
             
             # Find navigation properties
