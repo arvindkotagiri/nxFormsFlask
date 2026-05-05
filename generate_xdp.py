@@ -34,6 +34,7 @@ Return ONLY a JSON object: {
 
 @xdp_bp.route('/generate-xdp', methods=['POST'])
 def generate_xdp():
+    print("\n[BACKEND] --- STARTING XDP ARCHITECTURE GENERATION ---")
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -79,6 +80,7 @@ def generate_xdp():
         except Exception as map_err:
             print(f"Mapping Error (XDP): {map_err}")
 
+        print("[BACKEND] --- XDP GENERATION COMPLETE ---")
         return jsonify({
             "status": "success",
             "xdp_code": xdp_code,

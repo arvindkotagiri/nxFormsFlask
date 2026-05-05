@@ -87,8 +87,9 @@ def crop_and_save(pil_img, box_2d, field_name):
 
 @analyze_bp.route('/analyze-label', methods=['POST'])
 def analyze_label():
-    print("--- ANALYSIS STARTING: File Received ---")
-    if 'image' not in request.files: return jsonify({"error": "No file"}), 400
+    print("\n[BACKEND] --- STARTING LABEL ANALYSIS ---")
+    if 'image' not in request.files: 
+        return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
         file_bytes = file.read()
@@ -137,6 +138,7 @@ def analyze_label():
         pil_img.save(clean_buffered, format="PNG")
         clean_b64 = base64.b64encode(clean_buffered.getvalue()).decode()
 
+        print("[BACKEND] --- ANALYSIS COMPLETE ---")
         return jsonify({
             "status": "success",
             "extracted_fields": extracted_data,

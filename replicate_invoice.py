@@ -56,6 +56,7 @@ def crop_image_parts(pil_img, img_bytes):
 
 @invoice_bp.route('/replicate-invoice', methods=['POST'])
 def replicate_invoice():
+    print("\n[BACKEND] --- STARTING REPLICA GENERATION (HTML) ---")
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -112,6 +113,7 @@ def replicate_invoice():
         except Exception as map_err:
             print(f"Mapping Error (Invoice): {map_err}")
 
+        print("[BACKEND] --- REPLICA GENERATION COMPLETE ---")
         return jsonify({
             "status": "success",
             "full_html": html_content,
