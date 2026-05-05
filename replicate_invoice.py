@@ -7,22 +7,47 @@ from flask import Blueprint
 from llm_utils import call_llm
 
 load_dotenv()
+print("[RELOAD] replicate_invoice.py blueprint loaded", flush=True)
+
 invoice_bp = Blueprint('invoice', __name__)
 
 PROMPT_PRECISION = """
-Role: Expert Senior Frontend Engineer.
-Task: Create a pixel-perfect Tailwind CSS replica of the attached invoice.
-Instructions for Images:
-- If there is a logo, use an <img src="LOGO_PLACEHOLDER" alt="Logo"> tag.
-- If there is a signature, use an <img src="SIGNATURE_PLACEHOLDER" alt="Signature"> tag.
-- Do NOT use generic CSS for these; we will replace the placeholders.
+Role: Expert Screenshot-to-Code Engineer.
+Task: Generate a PIXEL-PERFECT HTML replica of the attached image.
 
-Instructions for Templating:
-- For dynamic content (customer name, dates, item descriptions, prices, totals), use the format {{fieldName}} instead of the hardcoded text.
-- Example: <div class="text-xl font-bold">{{CheckNumber}}</div>
+STRICT REQUIREMENTS:
+1. DIMENSIONS: Use a fixed container of 816px (width) by 1056px (height). This is exactly 8.5in x 11in at 96DPI.
+2. POSITIONING: Every single element (text, line, image) MUST use `position: absolute`.
+3. COORDINATES: Use `px` values for `top`, `left`, `width`, `height`, `font-size`, and `line-height`. Do NOT use percentages.
+4. STYLING: Use Tailwind CSS classes where possible, but use inline `style="..."` for precise pixel positioning and dimensions.
+5. FONT ACCURACY: Match the font weight and size exactly. If a text is 12px and bold, use `text-[12px] font-bold`.
+6. BORDERS & LINES: Horizontal and vertical lines must be 1px or 2px divs with a background color that matches the document.
+7. ASSETS: 
+   - <img src="LOGO_PLACEHOLDER" style="position: absolute; ...">
+   - <img src="SIGNATURE_PLACEHOLDER" style="position: absolute; ...">
 
-Return ONLY a JSON object: {"full_invoice_html": "<html>...</html>"}
+TEMPLATE FIELDS:
+Replace all dynamic text with {{fieldName}} while keeping the exact position and style of the original text.
+
+EXECUTION:
+- Imagine a grid of 816x1056 pixels over the image.
+- Map every visual element to its exact X/Y coordinate.
+- The output must pass a visual overlay test.
+
+Return ONLY a JSON object: {"full_invoice_html": "<div style='position: relative; width: 816px; height: 1056px; background: white;'>...</div>"}
 """
+
+def strip_html_wrappers(html):
+    """Clean the HTML for injection while preserving the core structure."""
+    # Remove everything outside the main container if the LLM provided a full document
+    match = re.search(r'<div.*?>.*</div>', html, flags=re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(0)
+    
+    # Fallback: just strip the obvious wrappers
+    html = re.sub(r'<(?:html|body|!doctype|head)[^>]*>', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'</(?:html|body|head)>', '', html, flags=re.IGNORECASE)
+    return html.strip()
 
 def crop_image_parts(pil_img, img_bytes):
     prompt_find_crops = """
@@ -56,52 +81,85 @@ def crop_image_parts(pil_img, img_bytes):
 
 @invoice_bp.route('/replicate-invoice', methods=['POST'])
 def replicate_invoice():
-    print("\n[BACKEND] --- STARTING REPLICA GENERATION (HTML) ---")
-    if 'image' not in request.files: return jsonify({"error": "No file"}), 400
+    print("\n" + "="*50, flush=True)
+    print("[BACKEND] --- REPLICA GENERATION (HTML) INITIATED ---", flush=True)
+    print("="*50, flush=True)
+    
+    if 'image' not in request.files: 
+        print("[ERROR] No image file found in request", flush=True)
+        return jsonify({"error": "No file"}), 400
+        
     try:
         file = request.files['image']
         file_bytes = file.read()
         filename = file.filename.lower()
+        print(f"[INFO] Processing file: {filename} ({len(file_bytes)} bytes)", flush=True)
 
         if filename.endswith('.pdf'):
+            print("[INFO] Converting PDF to image...", flush=True)
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) 
             img_bytes = pix.tobytes("jpeg")
             doc.close()
+            print("[SUCCESS] PDF converted to JPEG", flush=True)
         else:
+            print("[INFO] Processing image file...", flush=True)
             img_byte_arr = io.BytesIO()
             PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB").save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
+            print("[SUCCESS] Image prepared for LLM", flush=True)
 
         # Generate HTML
+        print("[INFO] Sending request to LLM (Pixel-Perfect Replica)...", flush=True)
         raw_response = call_llm(
             process_name='invoice',
             prompt=PROMPT_PRECISION,
             image_bytes=img_bytes,
             response_mime_type="application/json"
         )
-        data = json.loads(raw_response)
+        print("[SUCCESS] Received response from LLM", flush=True)
+        
+        try:
+            data = json.loads(raw_response)
+        except Exception as json_err:
+            print(f"[ERROR] Failed to parse LLM JSON response: {json_err}", flush=True)
+            print(f"[DEBUG] Raw response: {raw_response[:500]}...", flush=True)
+            return jsonify({"error": "Invalid JSON from LLM", "raw": raw_response}), 500
 
         if isinstance(data, list): html_content = data[0].get('full_invoice_html', '')
         else: html_content = data.get('full_invoice_html', '')
 
         if not html_content:
-            return jsonify({"error": "No HTML found", "raw": raw_response}), 500
+            print("[ERROR] LLM returned JSON but 'full_invoice_html' is missing or empty", flush=True)
+            return jsonify({"error": "No HTML found in LLM response", "raw": raw_response}), 500
+
+        # Strip any accidental HTML wrappers from LLM
+        html_content = strip_html_wrappers(html_content)
+
+        print(f"[INFO] Generated HTML size: {len(html_content)} characters", flush=True)
 
         # Handle crops
+        print("[INFO] Processing logo and signature assets...", flush=True)
         logo_b64 = request.form.get('logo_b64')
         signature_b64 = request.form.get('signature_b64')
         
+        if logo_b64: print("[INFO] Using provided logo from frontend", flush=True)
+        if signature_b64: print("[INFO] Using provided signature from frontend", flush=True)
+        
         # Only call crop_image_parts if we don't have them from frontend
         if not logo_b64 or not signature_b64:
+            print("[INFO] Missing assets from frontend, attempting backend cropping...", flush=True)
             pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
             backend_crops = crop_image_parts(pil_img_full, img_bytes)
-            if not logo_b64: logo_b64 = backend_crops.get('logo')
-            if not signature_b64: signature_b64 = backend_crops.get('signature')
+            if not logo_b64: 
+                logo_b64 = backend_crops.get('logo')
+                if logo_b64: print("[SUCCESS] Backend found logo", flush=True)
+            if not signature_b64: 
+                signature_b64 = backend_crops.get('signature')
+                if signature_b64: print("[SUCCESS] Backend found signature", flush=True)
         
         if logo_b64:
-            # Strip data prefix if present (we'll add it back consistently)
             if logo_b64.startswith('data:'): logo_b64 = logo_b64.split(',')[1]
             html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{logo_b64}")
         if signature_b64:
@@ -109,6 +167,7 @@ def replicate_invoice():
             html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{signature_b64}")
 
         # Mapping for preview
+        print("[INFO] Generating preview with sample values...", flush=True)
         preview_html = html_content
         try:
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
@@ -120,10 +179,14 @@ def replicate_invoice():
                 placeholder = "{{" + item['field_name'] + "}}"
                 if item['value']:
                     preview_html = preview_html.replace(placeholder, str(item['value']))
+            print("[SUCCESS] Preview mapping complete", flush=True)
         except Exception as map_err:
-            print(f"Mapping Error (Invoice): {map_err}")
+            print(f"[WARNING] Preview mapping failed: {map_err}", flush=True)
 
-        print("[BACKEND] --- REPLICA GENERATION COMPLETE ---")
+        print("="*50, flush=True)
+        print("[BACKEND] --- REPLICA GENERATION COMPLETE ---", flush=True)
+        print("="*50 + "\n", flush=True)
+        
         return jsonify({
             "status": "success",
             "full_html": html_content,
@@ -131,5 +194,7 @@ def replicate_invoice():
         })
 
     except Exception as e:
-        print(f"CRITICAL ERROR (Invoice): {str(e)}")
+        print(f"\n[CRITICAL ERROR] Exception in replicate_invoice: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500

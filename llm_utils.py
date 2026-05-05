@@ -167,7 +167,9 @@ def call_llm(process_name, prompt, system_instruction=None, image_bytes=None, re
     # Detect media type once here, pass it to all providers
     media_type = detect_media_type(image_bytes) if image_bytes else "image/png"
 
-    print(f"--- [LLM CALL] Provider: {provider}, Model: {model_id}, Process: {process_name} ---")
+    print(f"\n>>> [LLM CALL START] Provider: {provider}, Model: {model_id}, Process: {process_name} <<<", flush=True)
+    print(f"    [INFO] Prompt size: {len(prompt)} chars", flush=True)
+    if system_instruction: print(f"    [INFO] System instruction size: {len(system_instruction)} chars", flush=True)
     if provider == "google":
         return call_gemini(model_id, api_key, prompt, system_instruction, image_bytes, media_type, response_mime_type)
     elif provider == "openai":
@@ -193,14 +195,15 @@ def call_gemini(model_id, api_key, prompt, system_instruction, image_bytes, medi
     if system_instruction:
         config.system_instruction = system_instruction
 
-    print(f"   [GEMINI] Sending content to {model_id} (Image: {bool(image_bytes)})")
+    print(f"   [GEMINI] Sending content to {model_id} (Image: {bool(image_bytes)})", flush=True)
     response = client.models.generate_content(
         model=model_id,
         contents=contents,
         config=config
     )
     result = response.text.strip()
-    print(f"   [GEMINI] Response received (Size: {len(result)} chars)")
+    print(f"    [GEMINI] Response received ({len(result)} chars)", flush=True)
+    print(f"    [DEBUG] Response preview: {result[:100]}...", flush=True)
     return result
 
 
@@ -226,7 +229,7 @@ def call_openai(model_id, api_key, prompt, system_instruction, image_bytes, medi
 
     messages.append({"role": "user", "content": content})
 
-    print(f"   [OPENAI] Sending content to {model_id} (Image: {bool(image_bytes)})")
+    print(f"   [OPENAI] Sending content to {model_id} (Image: {bool(image_bytes)})", flush=True)
     response = client.chat.completions.create(
         model=model_id,
         messages=messages,
@@ -234,7 +237,8 @@ def call_openai(model_id, api_key, prompt, system_instruction, image_bytes, medi
         temperature=0.0
     )
     result = response.choices[0].message.content.strip()
-    print(f"   [OPENAI] Response received (Size: {len(result)} chars)")
+    print(f"    [OPENAI] Response received ({len(result)} chars)", flush=True)
+    print(f"    [DEBUG] Response preview: {result[:100]}...", flush=True)
     return result
 
 
@@ -264,7 +268,7 @@ def call_anthropic(model_id, api_key, prompt, system_instruction, image_bytes, m
     if response_mime_type == "application/json":
         content.append({"type": "text", "text": "Respond with valid JSON only. No markdown, no code fences, no explanation."})
 
-    print(f"   [ANTHROPIC] Sending content to {model_id} (Image: {bool(image_bytes)})")
+    print(f"   [ANTHROPIC] Sending content to {model_id} (Image: {bool(image_bytes)})", flush=True)
     response = client.messages.create(
         model=model_id,
         max_tokens=4096,
@@ -273,7 +277,8 @@ def call_anthropic(model_id, api_key, prompt, system_instruction, image_bytes, m
         temperature=0.0
     )
     raw = response.content[0].text.strip()
-    print(f"   [ANTHROPIC] Response received (Size: {len(raw)} chars)")
+    print(f"    [ANTHROPIC] Response received ({len(raw)} chars)", flush=True)
+    print(f"    [DEBUG] Response preview: {raw[:100]}...", flush=True)
 
     # Strip markdown code fences if Claude wrapped the JSON anyway
     if raw.startswith("```"):
