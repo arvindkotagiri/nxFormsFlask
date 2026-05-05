@@ -34,6 +34,7 @@ Return ONLY a JSON object: {
 
 @xdp_bp.route('/generate-xdp', methods=['POST'])
 def generate_xdp():
+    print("\n[BACKEND] --- STARTING XDP ARCHITECTURE GENERATION ---")
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -66,6 +67,23 @@ def generate_xdp():
 
         # Mapping for preview
         preview_xdp = xdp_code
+        layout_preview = []
+        try:
+            # Parse XDP to extract fields and coordinates for a "Ghost Preview"
+            # Remove namespaces for easier parsing
+            xml_no_ns = re.sub(r' xmlns(:[a-z0-9]+)?="[^"]+"', '', xdp_code)
+            root = ET.fromstring(xml_no_ns)
+            for field in root.findall('.//field'):
+                layout_preview.append({
+                    "name": field.get('name'),
+                    "x": field.get('x', '0'),
+                    "y": field.get('y', '0'),
+                    "w": field.get('w', '0'),
+                    "h": field.get('h', '0')
+                })
+        except Exception as p_err:
+            print(f"XDP Parse Error for Preview: {p_err}")
+
         try:
             analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
             analysis_res = call_llm(process_name='xdp', prompt=analysis_prompt, image_bytes=img_bytes, response_mime_type="application/json")
@@ -79,10 +97,12 @@ def generate_xdp():
         except Exception as map_err:
             print(f"Mapping Error (XDP): {map_err}")
 
+        print("[BACKEND] --- XDP GENERATION COMPLETE ---")
         return jsonify({
             "status": "success",
             "xdp_code": xdp_code,
             "preview_xdp": preview_xdp,
+            "layout_preview": layout_preview,
             "data_summary": data.get('data_summary', '')
         })
 

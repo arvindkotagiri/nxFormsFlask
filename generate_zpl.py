@@ -30,6 +30,7 @@ def get_labelary_preview(zpl_text, width_in, height_in, dpmm):
 
 @zpl_bp.route('/generate-zpl', methods=['POST'])
 def generate_zpl():
+    print("\n[BACKEND] --- STARTING ZPL CODE GENERATION ---")
     width_in = float(request.form.get('width', 4))
     height_in = float(request.form.get('height', 6))
     dpi = int(request.form.get('dpi', 203))
@@ -145,6 +146,7 @@ def generate_zpl():
 
         preview_b64 = get_labelary_preview(preview_zpl, width_in, height_in, dpmm)
 
+        print("[BACKEND] --- ZPL GENERATION COMPLETE ---")
         return jsonify({
             "status": "success",
             "zpl_code": zpl_code,

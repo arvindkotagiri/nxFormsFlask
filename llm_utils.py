@@ -167,6 +167,7 @@ def call_llm(process_name, prompt, system_instruction=None, image_bytes=None, re
     # Detect media type once here, pass it to all providers
     media_type = detect_media_type(image_bytes) if image_bytes else "image/png"
 
+    print(f"--- [LLM CALL] Provider: {provider}, Model: {model_id}, Process: {process_name} ---")
     if provider == "google":
         return call_gemini(model_id, api_key, prompt, system_instruction, image_bytes, media_type, response_mime_type)
     elif provider == "openai":
@@ -192,12 +193,15 @@ def call_gemini(model_id, api_key, prompt, system_instruction, image_bytes, medi
     if system_instruction:
         config.system_instruction = system_instruction
 
+    print(f"   [GEMINI] Sending content to {model_id} (Image: {bool(image_bytes)})")
     response = client.models.generate_content(
         model=model_id,
         contents=contents,
         config=config
     )
-    return response.text.strip()
+    result = response.text.strip()
+    print(f"   [GEMINI] Response received (Size: {len(result)} chars)")
+    return result
 
 
 def call_openai(model_id, api_key, prompt, system_instruction, image_bytes, media_type, response_mime_type):
@@ -222,13 +226,16 @@ def call_openai(model_id, api_key, prompt, system_instruction, image_bytes, medi
 
     messages.append({"role": "user", "content": content})
 
+    print(f"   [OPENAI] Sending content to {model_id} (Image: {bool(image_bytes)})")
     response = client.chat.completions.create(
         model=model_id,
         messages=messages,
         response_format={"type": "json_object"} if response_mime_type == "application/json" else None,
         temperature=0.0
     )
-    return response.choices[0].message.content.strip()
+    result = response.choices[0].message.content.strip()
+    print(f"   [OPENAI] Response received (Size: {len(result)} chars)")
+    return result
 
 
 def call_anthropic(model_id, api_key, prompt, system_instruction, image_bytes, media_type, response_mime_type):
@@ -257,6 +264,7 @@ def call_anthropic(model_id, api_key, prompt, system_instruction, image_bytes, m
     if response_mime_type == "application/json":
         content.append({"type": "text", "text": "Respond with valid JSON only. No markdown, no code fences, no explanation."})
 
+    print(f"   [ANTHROPIC] Sending content to {model_id} (Image: {bool(image_bytes)})")
     response = client.messages.create(
         model=model_id,
         max_tokens=4096,
@@ -265,6 +273,7 @@ def call_anthropic(model_id, api_key, prompt, system_instruction, image_bytes, m
         temperature=0.0
     )
     raw = response.content[0].text.strip()
+    print(f"   [ANTHROPIC] Response received (Size: {len(raw)} chars)")
 
     # Strip markdown code fences if Claude wrapped the JSON anyway
     if raw.startswith("```"):

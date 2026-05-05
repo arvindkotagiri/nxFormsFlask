@@ -56,6 +56,7 @@ def crop_image_parts(pil_img, img_bytes):
 
 @invoice_bp.route('/replicate-invoice', methods=['POST'])
 def replicate_invoice():
+    print("\n[BACKEND] --- STARTING REPLICA GENERATION (HTML) ---")
     if 'image' not in request.files: return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
@@ -89,13 +90,23 @@ def replicate_invoice():
             return jsonify({"error": "No HTML found", "raw": raw_response}), 500
 
         # Handle crops
-        pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        crops = crop_image_parts(pil_img_full, img_bytes)
+        logo_b64 = request.form.get('logo_b64')
+        signature_b64 = request.form.get('signature_b64')
         
-        if 'logo' in crops:
-            html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{crops['logo']}")
-        if 'signature' in crops:
-            html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{crops['signature']}")
+        # Only call crop_image_parts if we don't have them from frontend
+        if not logo_b64 or not signature_b64:
+            pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            backend_crops = crop_image_parts(pil_img_full, img_bytes)
+            if not logo_b64: logo_b64 = backend_crops.get('logo')
+            if not signature_b64: signature_b64 = backend_crops.get('signature')
+        
+        if logo_b64:
+            # Strip data prefix if present (we'll add it back consistently)
+            if logo_b64.startswith('data:'): logo_b64 = logo_b64.split(',')[1]
+            html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{logo_b64}")
+        if signature_b64:
+            if signature_b64.startswith('data:'): signature_b64 = signature_b64.split(',')[1]
+            html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{signature_b64}")
 
         # Mapping for preview
         preview_html = html_content
@@ -112,6 +123,7 @@ def replicate_invoice():
         except Exception as map_err:
             print(f"Mapping Error (Invoice): {map_err}")
 
+        print("[BACKEND] --- REPLICA GENERATION COMPLETE ---")
         return jsonify({
             "status": "success",
             "full_html": html_content,
