@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from llm_utils import call_llm
 
 load_dotenv()
+print("[RELOAD] analyze.py blueprint loaded", flush=True)
+
 analyze_bp = Blueprint('analyze', __name__)
 
 PROMPT_ANALYSIS = """
@@ -87,15 +89,21 @@ def crop_and_save(pil_img, box_2d, field_name):
 
 @analyze_bp.route('/analyze-label', methods=['POST'])
 def analyze_label():
-    print("\n[BACKEND] --- STARTING LABEL ANALYSIS ---")
+    print("\n" + "="*50, flush=True)
+    print("[BACKEND] --- LABEL ANALYSIS INITIATED ---", flush=True)
+    print("="*50, flush=True)
+    
     if 'image' not in request.files: 
+        print("[ERROR] No image file found in request", flush=True)
         return jsonify({"error": "No file"}), 400
     try:
         file = request.files['image']
         file_bytes = file.read()
         filename = file.filename.lower()
+        print(f"[INFO] Analyzing file: {filename} ({len(file_bytes)} bytes)", flush=True)
 
         if filename.endswith('.pdf'):
+            print("[INFO] Converting PDF to image for analysis...", flush=True)
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             page = doc.load_page(0)  
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
@@ -103,17 +111,21 @@ def analyze_label():
             pil_img = PIL.Image.open(io.BytesIO(img_data)).convert("RGB")
             doc.close()
             llm_img_bytes = img_data
+            print("[SUCCESS] PDF converted to image", flush=True)
         else:
             pil_img = PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB")
             llm_img_bytes = file_bytes
+            print("[INFO] Image loaded successfully", flush=True)
 
         # --- Generate Content using Unified LLM Caller ---
+        print("[INFO] Calling LLM for document analysis...", flush=True)
         raw_response = call_llm(
             process_name='analyze',
             prompt=PROMPT_ANALYSIS,
             image_bytes=llm_img_bytes,
             response_mime_type="application/json"
         )
+        print("[SUCCESS] Received analysis from LLM", flush=True)
         
         extracted_data = json.loads(raw_response)
         
@@ -123,22 +135,28 @@ def analyze_label():
         elif isinstance(extracted_data, dict) and "data" in extracted_data:
             extracted_data = extracted_data["data"]
 
+        print(f"[INFO] Found {len(extracted_data)} fields. Processing assets...", flush=True)
         for item in extracted_data:
             if item.get('content_type') in ['logo', 'signature']:
                 try:
                     filepath, b64_data = crop_and_save(pil_img, item['box_2d'], item['content_type'])
                     item['cropped_path'] = filepath
                     item['cropped_b64'] = b64_data
+                    print(f"    [ASSET] Cropped {item.get('content_type')}", flush=True)
                 except Exception as crop_err:
-                    print(f"Crop Error: {crop_err}")
+                    print(f"    [ERROR] Crop Error: {crop_err}", flush=True)
 
+        print("[INFO] Generating annotated preview...", flush=True)
         annotated_b64 = get_annotated_base64(pil_img.copy(), extracted_data)
 
         clean_buffered = io.BytesIO()
         pil_img.save(clean_buffered, format="PNG")
         clean_b64 = base64.b64encode(clean_buffered.getvalue()).decode()
 
-        print("[BACKEND] --- ANALYSIS COMPLETE ---")
+        print("="*50, flush=True)
+        print("[BACKEND] --- ANALYSIS COMPLETE ---", flush=True)
+        print("="*50 + "\n", flush=True)
+        
         return jsonify({
             "status": "success",
             "extracted_fields": extracted_data,
@@ -146,5 +164,7 @@ def analyze_label():
             "clean_image": f"data:image/png;base64,{clean_b64}"
         })
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        print(f"\n[CRITICAL ERROR] Analysis failed: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
