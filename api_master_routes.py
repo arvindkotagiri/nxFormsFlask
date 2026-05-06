@@ -49,6 +49,13 @@ def init_api_db():
             ADD COLUMN IF NOT EXISTS username TEXT,
             ADD COLUMN IF NOT EXISTS password TEXT;
         """)
+
+        cur.execute("""
+            ALTER TABLE contexts
+            ADD COLUMN IF NOT EXISTS application TEXT,
+            ADD COLUMN IF NOT EXISTS environment TEXT,
+            ADD COLUMN IF NOT EXISTS client NUMERIC(3);
+        """)
         conn.commit()
         return jsonify({"status": "success", "message": "Contexts table initialized"})
     except Exception as e:
@@ -75,8 +82,8 @@ def add_api():
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO contexts (name, endpoint, auth_type, client_id, client_secret, fields, entities, username, password)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+            INSERT INTO contexts (name, endpoint, auth_type, client_id, client_secret, fields, entities, username, password, application, environment, client)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
         """, (
             data['name'], 
             data['endpoint'], 
@@ -86,7 +93,10 @@ def add_api():
             psycopg2.extras.Json(data.get('fields', [])),
             psycopg2.extras.Json(data.get('entities', [])),
             data.get('username'),
-            data.get('password')
+            data.get('password'),
+            data.get('application'),
+            data.get('environment'),
+            data.get('client')
         ))
         api_id = cur.fetchone()[0]
         conn.commit()
@@ -106,7 +116,7 @@ def update_api(api_id):
     try:
         cur.execute("""
             UPDATE contexts 
-            SET name = %s, endpoint = %s, auth_type = %s, client_id = %s, client_secret = %s, fields = %s, entities = %s, username = %s, password = %s
+            SET name = %s, endpoint = %s, auth_type = %s, client_id = %s, client_secret = %s, fields = %s, entities = %s, username = %s, password = %s, application = %s, environment = %s, client = %s
             WHERE id = %s
         """, (
             data['name'], 
@@ -118,6 +128,9 @@ def update_api(api_id):
             psycopg2.extras.Json(data.get('entities', [])),
             data.get('username'),
             data.get('password'),
+            data.get('application'),
+            data.get('environment'),
+            data.get('client'),
             api_id
         ))
         conn.commit()
