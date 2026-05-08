@@ -12,7 +12,10 @@ xdp_bp = Blueprint('xdp', __name__)
 PROMPT_XDP = """
 Role: Expert Adobe Forms Architect.
 
-Task: Convert the attached document image into a valid, well-structured Adobe XDP (XML Data Package) file using XFA (XML Forms Architecture).
+Task: Convert the attached document image into a valid, well-structured Adobe XDP file. Use the provided HTML_DESIGN as the source of truth if available.
+    
+    HTML_DESIGN:
+    {request.form.get('html_design', 'Not provided')}
 
 Instructions:
 1. Identify all labels, fields (static and dynamic), and layout structures (containers, subforms) from the image.

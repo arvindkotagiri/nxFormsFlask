@@ -59,6 +59,11 @@ def generate_zpl():
         ACT AS A ZPL EXPERT.
         Convert the attached label image into valid ZPL II code.
         
+        If an HTML_DESIGN is provided below, use it as the ABSOLUTE source of truth for positions, dimensions, and text content.
+        
+        HTML_DESIGN:
+        {request.form.get('html_design', 'Not provided')}
+        
         SPECS:
         - Target DPI: {dpi} ({dpmm} dpmm)
         - Label Size: {width_in}" x {height_in}"
