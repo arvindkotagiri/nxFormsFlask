@@ -1,7 +1,9 @@
 import os
 import uuid
 import psycopg2
+import socket
 from psycopg2.extras import RealDictCursor
+
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from dotenv import load_dotenv
@@ -27,6 +29,18 @@ def get_db_connection():
         cursor_factory=RealDictCursor
     )
     return conn
+
+def send_to_printer(ip, port, data):
+    """Sends raw ZPL data to a network printer via socket."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(10)
+            s.connect((ip, int(port)))
+            s.sendall(data.encode('utf-8'))
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
 
 @printer_bp.route('/init-db', methods=['POST'])
 def init_db():
@@ -191,3 +205,24 @@ def update_job_status(job_id):
         return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@printer_bp.route('/direct-print', methods=['POST'])
+def direct_print():
+    """Immediately sends ZPL to a printer (used when UI acts as agent)."""
+    try:
+        data = request.json
+        ip = data.get('ip_address')
+        payload = data.get('payload')
+        port = data.get('port', 9100)
+        
+        if not ip or not payload:
+            return jsonify({"error": "Missing IP or payload"}), 400
+            
+        success, error = send_to_printer(ip, port, payload)
+        if success:
+            return jsonify({"status": "success"}), 200
+        else:
+            return jsonify({"status": "failed", "error": error}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
