@@ -150,7 +150,7 @@ def get_model_configs():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT key, value FROM system_settings WHERE key LIKE 'model_%' OR key LIKE 'api_%'")
+        cur.execute("SELECT key, value FROM system_settings WHERE key LIKE 'model_%' OR key LIKE 'api_%' OR key LIKE 'agent_%'")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -165,7 +165,7 @@ def save_model_configs():
         conn = get_db_connection()
         cur = conn.cursor()
         for key, val in data.items():
-            if key.startswith('model_') or key.startswith('api_'):
+            if key.startswith('model_') or key.startswith('api_') or key.startswith('agent_'):
                 cur.execute("INSERT INTO system_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (key, val))
         conn.commit()
         cur.close()
