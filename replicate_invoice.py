@@ -57,25 +57,52 @@ def crop_image_parts(pil_img, img_bytes):
     try:
         res = call_llm(process_name='invoice', prompt=prompt_find_crops, image_bytes=img_bytes, response_mime_type="application/json")
         items = json.loads(res)
-    except:
+    except Exception as e:
+        print(f"[WARNING] crop_image_parts LLM call or JSON parsing failed: {e}", flush=True)
         return {}
 
     crops = {}
     width, height = pil_img.size
+    
+    if not isinstance(items, list):
+        print(f"[WARNING] Expected items list in crop_image_parts, got: {type(items)}", flush=True)
+        return {}
+
     for item in items:
-        name = item.get('field_name')
-        box = item.get('box_2d')
-        if name and box:
-            ymin, xmin, ymax, xmax = box
-            left, top = (xmin * width) / 1000, (ymin * height) / 1000
-            right, bottom = (xmax * width) / 1000, (ymax * height) / 1000
-            
-            p = 10
-            cropped = pil_img.crop((max(0, left-p), max(0, top-p), min(width, right+p), min(height, bottom+p)))
-            
-            buffered = io.BytesIO()
-            cropped.convert("RGB").save(buffered, format="PNG")
-            crops[name] = base64.b64encode(buffered.getvalue()).decode()
+        try:
+            if not isinstance(item, dict):
+                continue
+            name = item.get('field_name')
+            box = item.get('box_2d')
+            if name and box:
+                # Normalize nesting (e.g. [[ymin, xmin, ymax, xmax]] to [ymin, xmin, ymax, xmax])
+                if isinstance(box, list) and len(box) == 1 and isinstance(box[0], list):
+                    box = box[0]
+
+                if not isinstance(box, (list, tuple)) or len(box) != 4:
+                    print(f"[WARNING] Invalid crop box for '{name}': {box}", flush=True)
+                    continue
+
+                ymin, xmin, ymax, xmax = box
+                
+                # Convert to floats and validate
+                try:
+                    ymin, xmin, ymax, xmax = float(ymin), float(xmin), float(ymax), float(xmax)
+                except (ValueError, TypeError):
+                    print(f"[WARNING] Crop box coordinates are not numeric for '{name}': {box}", flush=True)
+                    continue
+
+                left, top = (xmin * width) / 1000, (ymin * height) / 1000
+                right, bottom = (xmax * width) / 1000, (ymax * height) / 1000
+                
+                p = 10
+                cropped = pil_img.crop((max(0, left-p), max(0, top-p), min(width, right+p), min(height, bottom+p)))
+                
+                buffered = io.BytesIO()
+                cropped.convert("RGB").save(buffered, format="PNG")
+                crops[name] = base64.b64encode(buffered.getvalue()).decode()
+        except Exception as item_err:
+            print(f"[WARNING] Error processing item crop '{item}': {item_err}", flush=True)
             
     return crops
 
