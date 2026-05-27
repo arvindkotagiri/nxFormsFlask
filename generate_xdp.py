@@ -46,11 +46,32 @@ def generate_xdp():
         filename = file.filename.lower()
 
         if filename.endswith('.pdf'):
+            print("[INFO] Converting PDF pages to single stacked image for XDP...", flush=True)
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) 
-            img_bytes = pix.tobytes("jpeg")
+            num_pages = len(doc)
+            page_images = []
+            total_height = 0
+            max_width = 0
+            for i in range(num_pages):
+                page = doc.load_page(i)
+                pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
+                img_data = pix.tobytes("png")
+                p_img = PIL.Image.open(io.BytesIO(img_data)).convert("RGB")
+                page_images.append(p_img)
+                total_height += p_img.height
+                max_width = max(max_width, p_img.width)
             doc.close()
+            
+            # Combine them vertically
+            stacked_img = PIL.Image.new("RGB", (max_width, total_height), (255, 255, 255))
+            current_y = 0
+            for p_img in page_images:
+                stacked_img.paste(p_img, (0, current_y))
+                current_y += p_img.height
+                
+            img_byte_arr = io.BytesIO()
+            stacked_img.save(img_byte_arr, format='JPEG')
+            img_bytes = img_byte_arr.getvalue()
         else:
             img_byte_arr = io.BytesIO()
             PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB").save(img_byte_arr, format='JPEG')
