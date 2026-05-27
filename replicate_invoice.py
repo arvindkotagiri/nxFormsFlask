@@ -357,14 +357,103 @@ def replicate_invoice():
         filename = file.filename.lower()
         print(f"[INFO] Processing file: {filename} ({len(file_bytes)} bytes)", flush=True)
 
-        if filename.endswith('.pdf'):
-            print("[INFO] Converting PDF to image...", flush=True)
+        is_pdf = filename.endswith('.pdf')
+        logo_b64 = request.form.get('logo_b64')
+        signature_b64 = request.form.get('signature_b64')
+
+        if is_pdf:
+            print("[INFO] Converting PDF to images page by page...", flush=True)
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(3, 3))
-            img_bytes = pix.tobytes("jpeg")
+            num_pages = len(doc)
+            print(f"[INFO] PDF has {num_pages} pages.", flush=True)
+
+            page_htmls = []
+            preview_fields = []
+
+            for page_idx in range(num_pages):
+                print(f"[INFO] Rendering page {page_idx + 1}/{num_pages}...", flush=True)
+                page = doc.load_page(page_idx)
+                pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) 
+                img_bytes = pix.tobytes("jpeg")
+
+                # Generate HTML for this page
+                print(f"[INFO] Sending page {page_idx + 1} request to LLM...", flush=True)
+                raw_response = call_llm(
+                    process_name='invoice',
+                    prompt=PROMPT_PRECISION,
+                    image_bytes=img_bytes,
+                    response_mime_type="application/json"
+                )
+                print(f"[SUCCESS] Page {page_idx + 1} replica received", flush=True)
+
+                try:
+                    data = json.loads(raw_response)
+                except Exception as json_err:
+                    print(f"[ERROR] Failed to parse page {page_idx + 1} JSON: {json_err}", flush=True)
+                    continue
+
+                if isinstance(data, list):
+                    html_content = data[0].get('full_invoice_html', '')
+                else:
+                    html_content = data.get('full_invoice_html', '')
+
+                if html_content:
+                    html_content = strip_html_wrappers(html_content)
+                    page_htmls.append((page_idx, html_content, img_bytes))
+
             doc.close()
-            print("[SUCCESS] PDF converted to JPEG", flush=True)
+
+            if not page_htmls:
+                return jsonify({"error": "Failed to generate HTML for any page"}), 500
+
+            # Combine page blocks into a single wrapper
+            combined_html = '<div class="multi-page-container" style="display: flex; flex-direction: column; gap: 20px; background: #f1f5f9; padding: 20px;">'
+            for page_idx, p_html, p_img_bytes in page_htmls:
+                # Localize replacements for this specific page (like logos/signatures)
+                local_html = p_html
+                
+                # Check for logo/signature crops on this page
+                p_logo_b64 = logo_b64
+                p_sig_b64 = signature_b64
+
+                if not p_logo_b64 or not p_sig_b64:
+                    pil_img_full = PIL.Image.open(io.BytesIO(p_img_bytes)).convert("RGB")
+                    backend_crops = crop_image_parts(pil_img_full, p_img_bytes)
+                    if not p_logo_b64: p_logo_b64 = backend_crops.get('logo')
+                    if not p_sig_b64: p_sig_b64 = backend_crops.get('signature')
+
+                if p_logo_b64:
+                    if p_logo_b64.startswith('data:'): p_logo_b64 = p_logo_b64.split(',')[1]
+                    local_html = local_html.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{p_logo_b64}")
+                if p_sig_b64:
+                    if p_sig_b64.startswith('data:'): p_sig_b64 = p_sig_b64.split(',')[1]
+                    local_html = local_html.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{p_sig_b64}")
+
+                combined_html += f"""
+                <div class="pdf-page-wrapper" data-page-index="{page_idx}" style="position: relative; width: 816px; height: 1056px; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); margin: 0 auto; page-break-after: always;">
+                    {local_html}
+                </div>
+                """
+            combined_html += '</div>'
+
+            html_result = combined_html
+            preview_html = combined_html
+
+            # Perform preview replacements by calling LLM on the first page
+            first_img_bytes = page_htmls[0][2]
+            try:
+                analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
+                analysis_res = call_llm(process_name='invoice', prompt=analysis_prompt, image_bytes=first_img_bytes, response_mime_type="application/json")
+                field_data = json.loads(analysis_res)
+                if isinstance(field_data, dict) and "fields" in field_data: field_data = field_data["fields"]
+                
+                for item in field_data:
+                    placeholder = "{{" + item['field_name'] + "}}"
+                    if item['value']:
+                        preview_html = preview_html.replace(placeholder, str(item['value']))
+            except Exception as map_err:
+                print(f"[WARNING] Preview mapping failed on multi-page PDF: {map_err}", flush=True)
+
         else:
             print("[INFO] Processing image file...", flush=True)
             img_byte_arr = io.BytesIO()
@@ -423,9 +512,8 @@ def replicate_invoice():
         else:
             html_content = data.get('full_invoice_html', '')
 
-        if not html_content:
-            print("[ERROR] LLM returned JSON but 'full_invoice_html' is missing or empty", flush=True)
-            return jsonify({"error": "No HTML found in LLM response", "raw": raw_response}), 500
+            if not html_content:
+                return jsonify({"error": "No HTML found in LLM response", "raw": raw_response}), 500
 
         # Strip accidental HTML wrappers
         html_content = strip_html_wrappers(html_content)
@@ -511,7 +599,7 @@ def replicate_invoice():
 
         return jsonify({
             "status": "success",
-            "full_html": html_content,
+            "full_html": html_result,
             "preview_html": preview_html
         })
 
