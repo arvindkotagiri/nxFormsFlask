@@ -44,16 +44,34 @@ def generate_zpl():
         file_bytes = file.read()
         filename = file.filename.lower()
 
+        # Determine page images
         if filename.endswith('.pdf'):
+            print("[INFO] Converting PDF to images page by page for ZPL...", flush=True)
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) 
-            llm_img_bytes = pix.tobytes("jpeg")
-            pil_img = PIL.Image.open(io.BytesIO(llm_img_bytes)).convert("RGB")
+            num_pages = len(doc)
+            page_images = []
+            for i in range(num_pages):
+                page = doc.load_page(i)
+                pix = page.get_pixmap(matrix=fitz.Matrix(3, 3)) 
+                img_bytes = pix.tobytes("jpeg")
+                page_images.append(PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB"))
             doc.close()
         else:
+            # Single image uploaded (could be modifiedLabelBlob representing multiple pages stacked!)
             pil_img = PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB")
-            llm_img_bytes = file_bytes
+            width, height = pil_img.size
+            # The standard height of 1 page at 96dpi is 1056. The width is 816.
+            # Page aspect ratio is height/width = 11/8.5 = 1.2941
+            page_height = int(width * (11 / 8.5))
+            num_pages = max(1, round(height / page_height))
+            print(f"[INFO] Image height is {height}, page_height calculated as {page_height}. Detected {num_pages} pages.", flush=True)
+            
+            page_images = []
+            for i in range(num_pages):
+                top = i * page_height
+                bottom = min(height, (i + 1) * page_height)
+                page_img = pil_img.crop((0, top, width, bottom))
+                page_images.append(page_img)
 
         zpl_prompt = f"""
         ACT AS A ZPL EXPERT.
@@ -114,49 +132,69 @@ def generate_zpl():
                 return crops
             except: return {}
 
-        # Generate ZPL
-        raw_zpl = call_llm(process_name='zpl', prompt=zpl_prompt, image_bytes=llm_img_bytes, response_mime_type="text/plain")
-        zpl_code = clean_zpl(raw_zpl)
-        
-        if not zpl_code:
-            return jsonify({"error": "AI failed to generate ZPL"}), 500
+        zpl_blocks = []
+        preview_zpls = []
+        labelary_previews = []
 
-        # Replace placeholders
-        crops_zpl = crop_parts(pil_img, llm_img_bytes)
-        if 'logo' in crops_zpl:
-            zpl_code = zpl_code.replace('^GF_LOGO_PLACEHOLDER', crops_zpl['logo'])
-        else:
-            zpl_code = zpl_code.replace('^GF_LOGO_PLACEHOLDER', '')
+        for page_idx, p_img in enumerate(page_images):
+            print(f"[INFO] Generating ZPL for page {page_idx + 1}/{len(page_images)}...", flush=True)
             
-        if 'signature' in crops_zpl:
-            zpl_code = zpl_code.replace('^GF_SIGNATURE_PLACEHOLDER', crops_zpl['signature'])
-        else:
-            zpl_code = zpl_code.replace('^GF_SIGNATURE_PLACEHOLDER', '')
+            p_img_byte_arr = io.BytesIO()
+            p_img.save(p_img_byte_arr, format='JPEG')
+            p_img_bytes = p_img_byte_arr.getvalue()
 
-        # Preview mapping
-        preview_zpl = zpl_code
-        try:
-            analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
-            analysis_res = call_llm(process_name='zpl', prompt=analysis_prompt, image_bytes=llm_img_bytes, response_mime_type="application/json")
-            field_data = json.loads(analysis_res)
-            # Handle potential nested lists
-            if isinstance(field_data, dict) and "fields" in field_data: field_data = field_data["fields"]
+            raw_zpl = call_llm(process_name='zpl', prompt=zpl_prompt, image_bytes=p_img_bytes, response_mime_type="text/plain")
+            zpl_code = clean_zpl(raw_zpl)
             
-            for item in field_data:
-                placeholder = "{{" + item['field_name'] + "}}"
-                if item['value']:
-                    preview_zpl = preview_zpl.replace(placeholder, str(item['value']))
-        except Exception as map_err:
-            print(f"Mapping Error (ZPL): {map_err}")
+            if not zpl_code:
+                print(f"[WARNING] AI failed to generate ZPL for page {page_idx + 1}", flush=True)
+                continue
 
-        preview_b64 = get_labelary_preview(preview_zpl, width_in, height_in, dpmm)
+            # Replace placeholders
+            crops_zpl = crop_parts(p_img, p_img_bytes)
+            if 'logo' in crops_zpl:
+                zpl_code = zpl_code.replace('^GF_LOGO_PLACEHOLDER', crops_zpl['logo'])
+            else:
+                zpl_code = zpl_code.replace('^GF_LOGO_PLACEHOLDER', '')
+                
+            if 'signature' in crops_zpl:
+                zpl_code = zpl_code.replace('^GF_SIGNATURE_PLACEHOLDER', crops_zpl['signature'])
+            else:
+                zpl_code = zpl_code.replace('^GF_SIGNATURE_PLACEHOLDER', '')
+
+            zpl_blocks.append(zpl_code)
+
+            # Preview mapping
+            preview_zpl = zpl_code
+            try:
+                analysis_prompt = "Return JSON list of {'field_name': '...', 'value': '...'}"
+                analysis_res = call_llm(process_name='zpl', prompt=analysis_prompt, image_bytes=p_img_bytes, response_mime_type="application/json")
+                field_data = json.loads(analysis_res)
+                if isinstance(field_data, dict) and "fields" in field_data: field_data = field_data["fields"]
+                
+                for item in field_data:
+                    placeholder = "{{" + item['field_name'] + "}}"
+                    if item['value']:
+                        preview_zpl = preview_zpl.replace(placeholder, str(item['value']))
+            except Exception as map_err:
+                print(f"Mapping Error (ZPL Page {page_idx}): {map_err}")
+
+            preview_zpls.append(preview_zpl)
+
+            preview_b64 = get_labelary_preview(preview_zpl, width_in, height_in, dpmm)
+            if preview_b64:
+                labelary_previews.append(f"data:image/png;base64,{preview_b64}")
+
+        full_zpl = "\n".join(zpl_blocks)
+        full_preview_zpl = "\n".join(preview_zpls)
 
         print("[BACKEND] --- ZPL GENERATION COMPLETE ---")
         return jsonify({
             "status": "success",
-            "zpl_code": zpl_code,
-            "labelary_preview": f"data:image/png;base64,{preview_b64}" if preview_b64 else None,
-            "preview_zpl": preview_zpl
+            "zpl_code": full_zpl,
+            "labelary_preview": labelary_previews[0] if labelary_previews else None,
+            "labelary_previews": labelary_previews,
+            "preview_zpl": full_preview_zpl
         })
 
     except Exception as e:

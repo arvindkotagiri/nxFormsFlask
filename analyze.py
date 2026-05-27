@@ -102,56 +102,98 @@ def analyze_label():
         filename = file.filename.lower()
         print(f"[INFO] Analyzing file: {filename} ({len(file_bytes)} bytes)", flush=True)
 
+        all_extracted_fields = []
+        annotated_images = []
+        clean_images = []
+
         if filename.endswith('.pdf'):
-            print("[INFO] Converting PDF to image for analysis...", flush=True)
+            print("[INFO] Processing PDF file...", flush=True)
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            page = doc.load_page(0)  
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img_data = pix.tobytes("png")
-            pil_img = PIL.Image.open(io.BytesIO(img_data)).convert("RGB")
+            num_pages = len(doc)
+            print(f"[INFO] PDF has {num_pages} pages.", flush=True)
+
+            for page_idx in range(num_pages):
+                print(f"[INFO] Analyzing page {page_idx + 1}/{num_pages}...", flush=True)
+                page = doc.load_page(page_idx)
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_data = pix.tobytes("png")
+                pil_img = PIL.Image.open(io.BytesIO(img_data)).convert("RGB")
+
+                # Call LLM for this page
+                raw_response = call_llm(
+                    process_name='analyze',
+                    prompt=PROMPT_ANALYSIS,
+                    image_bytes=img_data,
+                    response_mime_type="application/json"
+                )
+                
+                extracted_data = json.loads(raw_response)
+                if isinstance(extracted_data, dict) and "fields" in extracted_data:
+                    extracted_data = extracted_data["fields"]
+                elif isinstance(extracted_data, dict) and "data" in extracted_data:
+                    extracted_data = extracted_data["data"]
+
+                # Process crops and tag with page_index
+                for item in extracted_data:
+                    item['page_index'] = page_idx
+                    if item.get('content_type') in ['logo', 'signature']:
+                        try:
+                            filepath, b64_data = crop_and_save(pil_img, item['box_2d'], f"{item['content_type']}_p{page_idx}")
+                            item['cropped_path'] = filepath
+                            item['cropped_b64'] = b64_data
+                        except Exception as crop_err:
+                            print(f"    [ERROR] Crop Error on page {page_idx}: {crop_err}", flush=True)
+
+                all_extracted_fields.extend(extracted_data)
+
+                # Generate previews for this page
+                annotated_b64 = get_annotated_base64(pil_img.copy(), extracted_data)
+                clean_buffered = io.BytesIO()
+                pil_img.save(clean_buffered, format="PNG")
+                clean_b64 = base64.b64encode(clean_buffered.getvalue()).decode()
+
+                annotated_images.append(f"data:image/png;base64,{annotated_b64}")
+                clean_images.append(f"data:image/png;base64,{clean_b64}")
+
             doc.close()
-            llm_img_bytes = img_data
-            print("[SUCCESS] PDF converted to image", flush=True)
+            print("[SUCCESS] Multi-page PDF analysis complete", flush=True)
         else:
+            # Single image upload
+            print("[INFO] Processing image file...", flush=True)
             pil_img = PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB")
-            llm_img_bytes = file_bytes
-            print("[INFO] Image loaded successfully", flush=True)
+            
+            raw_response = call_llm(
+                process_name='analyze',
+                prompt=PROMPT_ANALYSIS,
+                image_bytes=file_bytes,
+                response_mime_type="application/json"
+            )
+            
+            extracted_data = json.loads(raw_response)
+            if isinstance(extracted_data, dict) and "fields" in extracted_data:
+                extracted_data = extracted_data["fields"]
+            elif isinstance(extracted_data, dict) and "data" in extracted_data:
+                extracted_data = extracted_data["data"]
 
-        # --- Generate Content using Unified LLM Caller ---
-        print("[INFO] Calling LLM for document analysis...", flush=True)
-        raw_response = call_llm(
-            process_name='analyze',
-            prompt=PROMPT_ANALYSIS,
-            image_bytes=llm_img_bytes,
-            response_mime_type="application/json"
-        )
-        print("[SUCCESS] Received analysis from LLM", flush=True)
-        
-        extracted_data = json.loads(raw_response)
-        
-        # In case the model returns the list direct or in a wrapper
-        if isinstance(extracted_data, dict) and "fields" in extracted_data:
-            extracted_data = extracted_data["fields"]
-        elif isinstance(extracted_data, dict) and "data" in extracted_data:
-            extracted_data = extracted_data["data"]
+            for item in extracted_data:
+                item['page_index'] = 0
+                if item.get('content_type') in ['logo', 'signature']:
+                    try:
+                        filepath, b64_data = crop_and_save(pil_img, item['box_2d'], item['content_type'])
+                        item['cropped_path'] = filepath
+                        item['cropped_b64'] = b64_data
+                    except Exception as crop_err:
+                        print(f"    [ERROR] Crop Error: {crop_err}", flush=True)
 
-        print(f"[INFO] Found {len(extracted_data)} fields. Processing assets...", flush=True)
-        for item in extracted_data:
-            if item.get('content_type') in ['logo', 'signature']:
-                try:
-                    filepath, b64_data = crop_and_save(pil_img, item['box_2d'], item['content_type'])
-                    item['cropped_path'] = filepath
-                    item['cropped_b64'] = b64_data
-                    print(f"    [ASSET] Cropped {item.get('content_type')}", flush=True)
-                except Exception as crop_err:
-                    print(f"    [ERROR] Crop Error: {crop_err}", flush=True)
+            all_extracted_fields = extracted_data
 
-        print("[INFO] Generating annotated preview...", flush=True)
-        annotated_b64 = get_annotated_base64(pil_img.copy(), extracted_data)
+            annotated_b64 = get_annotated_base64(pil_img.copy(), extracted_data)
+            clean_buffered = io.BytesIO()
+            pil_img.save(clean_buffered, format="PNG")
+            clean_b64 = base64.b64encode(clean_buffered.getvalue()).decode()
 
-        clean_buffered = io.BytesIO()
-        pil_img.save(clean_buffered, format="PNG")
-        clean_b64 = base64.b64encode(clean_buffered.getvalue()).decode()
+            annotated_images = [f"data:image/png;base64,{annotated_b64}"]
+            clean_images = [f"data:image/png;base64,{clean_b64}"]
 
         print("="*50, flush=True)
         print("[BACKEND] --- ANALYSIS COMPLETE ---", flush=True)
@@ -159,9 +201,11 @@ def analyze_label():
         
         return jsonify({
             "status": "success",
-            "extracted_fields": extracted_data,
-            "annotated_image": f"data:image/png;base64,{annotated_b64}",
-            "clean_image": f"data:image/png;base64,{clean_b64}"
+            "extracted_fields": all_extracted_fields,
+            "annotated_image": annotated_images[0],
+            "clean_image": clean_images[0],
+            "annotated_images": annotated_images,
+            "clean_images": clean_images
         })
     except Exception as e:
         print(f"\n[CRITICAL ERROR] Analysis failed: {e}", flush=True)
