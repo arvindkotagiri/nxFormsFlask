@@ -32,6 +32,7 @@ def init_api_db():
                 name TEXT NOT NULL,
                 endpoint TEXT NOT NULL,
                 auth_type TEXT,
+                auth_url TEXT,
                 client_id TEXT,
                 client_secret TEXT,
                 fields JSONB,
@@ -82,12 +83,13 @@ def add_api():
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO contexts (name, endpoint, auth_type, client_id, client_secret, fields, entities, username, password, application, environment, client)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+            INSERT INTO contexts (name, endpoint, auth_type, auth_url, client_id, client_secret, fields, entities, username, password, application, environment, client)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
         """, (
             data['name'], 
             data['endpoint'], 
             data.get('auth_type'), 
+            data.get('auth_url'), 
             data.get('client_id'), 
             data.get('client_secret'),
             psycopg2.extras.Json(data.get('fields', [])),
@@ -116,12 +118,13 @@ def update_api(api_id):
     try:
         cur.execute("""
             UPDATE contexts 
-            SET name = %s, endpoint = %s, auth_type = %s, client_id = %s, client_secret = %s, fields = %s, entities = %s, username = %s, password = %s, application = %s, environment = %s, client = %s
+            SET name = %s, endpoint = %s, auth_type = %s, auth_url = %s, client_id = %s, client_secret = %s, fields = %s, entities = %s, username = %s, password = %s, application = %s, environment = %s, client = %s
             WHERE id = %s
         """, (
             data['name'], 
             data['endpoint'], 
             data.get('auth_type'), 
+            data.get('auth_url'), 
             data.get('client_id'), 
             data.get('client_secret'),
             psycopg2.extras.Json(data.get('fields', [])),
