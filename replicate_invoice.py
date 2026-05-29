@@ -288,61 +288,120 @@ def build_placeholder_prompt_block(field_mappings: dict) -> str:
 
 
 def apply_asset_replacements(html_content, crops):
-    # Standard logo / signature fallback checks
-    logo_b64 = crops.get('logo')
-    sig_b64 = crops.get('signature')
+    # Find all <img> tags in the HTML
+    img_tags = re.findall(r'<img[^>]*>', html_content, re.IGNORECASE)
     
-    if logo_b64:
-        if logo_b64.startswith('data:'): logo_b64 = logo_b64.split(',')[1]
-        html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{logo_b64}")
-    if sig_b64:
-        if sig_b64.startswith('data:'): sig_b64 = sig_b64.split(',')[1]
-        html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{sig_b64}")
-
-    # General replacements for barcode, qrcode and numbered placeholders
-    for placeholder_key, base64_val in crops.items():
-        if not base64_val:
+    # Heuristically classify all <img> tags in the HTML
+    logos_found = []
+    signatures_found = []
+    barcodes_found = []
+    qrcodes_found = []
+    
+    for tag in img_tags:
+        src_match = re.search(r'src=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+        alt_match = re.search(r'alt=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+        id_match = re.search(r'id=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+        style_match = re.search(r'style=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+        
+        src = src_match.group(1) if src_match else ""
+        alt = alt_match.group(1) if alt_match else ""
+        img_id = id_match.group(1) if id_match else ""
+        style = style_match.group(1) if style_match else ""
+        
+        # Heuristics
+        is_watermark = "watermark" in src.lower() or "watermark" in img_id.lower() or "watermark" in alt.lower()
+        if is_watermark:
             continue
-        if base64_val.startswith('data:'):
-            base64_val = base64_val.split(',')[1]
             
-        upper_key = placeholder_key.upper()
-        placeholder_str = f"{upper_key}_PLACEHOLDER"
-        html_content = html_content.replace(placeholder_str, f"data:image/png;base64,{base64_val}")
+        is_logo = "logo" in src.lower() or "logo" in alt.lower() or "logo" in img_id.lower() or "logo_placeholder" in src.lower()
+        is_sig = "signature" in src.lower() or "signature" in alt.lower() or "signature" in img_id.lower() or "signature_placeholder" in src.lower()
         
-        # Suffix handling
-        if "BARCODE" in upper_key:
-            num_suffix = upper_key.replace("BARCODE", "").strip("_")
-            if num_suffix:
-                html_content = html_content.replace(f"BARCODE_PLACEHOLDER_{num_suffix}", f"data:image/png;base64,{base64_val}")
-                html_content = html_content.replace(f"BARCODE_{num_suffix}_PLACEHOLDER", f"data:image/png;base64,{base64_val}")
-        elif "QRCODE" in upper_key:
-            num_suffix = upper_key.replace("QRCODE", "").strip("_")
-            if num_suffix:
-                html_content = html_content.replace(f"QRCODE_PLACEHOLDER_{num_suffix}", f"data:image/png;base64,{base64_val}")
-                html_content = html_content.replace(f"QRCODE_{num_suffix}_PLACEHOLDER", f"data:image/png;base64,{base64_val}")
-
-    # Broad fallbacks
-    if 'barcode' in crops:
-        bc_val = crops['barcode']
-        if bc_val.startswith('data:'): bc_val = bc_val.split(',')[1]
-        html_content = html_content.replace("BARCODE_PLACEHOLDER", f"data:image/png;base64,{bc_val}")
-        html_content = html_content.replace("BARCODE_PLACEHOLDER_1", f"data:image/png;base64,{bc_val}")
-    if 'barcode_1' in crops:
-        bc_val = crops['barcode_1']
-        if bc_val.startswith('data:'): bc_val = bc_val.split(',')[1]
-        html_content = html_content.replace("BARCODE_PLACEHOLDER", f"data:image/png;base64,{bc_val}")
+        is_barcode = "barcode" in src.lower() or "barcode" in alt.lower() or "barcode" in img_id.lower() or "barcode_placeholder" in src.lower() or "barcode" in tag.lower()
+        is_qrcode = "qrcode" in src.lower() or "qr_code" in src.lower() or "qr" in src.lower() or "qrcode" in alt.lower() or "qrcode" in img_id.lower() or "qrcode" in tag.lower()
         
-    if 'qrcode' in crops:
-        qr_val = crops['qrcode']
-        if qr_val.startswith('data:'): qr_val = qr_val.split(',')[1]
-        html_content = html_content.replace("QRCODE_PLACEHOLDER", f"data:image/png;base64,{qr_val}")
-        html_content = html_content.replace("QRCODE_PLACEHOLDER_1", f"data:image/png;base64,{qr_val}")
-    if 'qrcode_1' in crops:
-        qr_val = crops['qrcode_1']
-        if qr_val.startswith('data:'): qr_val = qr_val.split(',')[1]
-        html_content = html_content.replace("QRCODE_PLACEHOLDER", f"data:image/png;base64,{qr_val}")
-
+        top_match = re.search(r'top:\s*([0-9.-]+)px', style, re.IGNORECASE)
+        top_val = float(top_match.group(1)) if top_match else 0.0
+        
+        # Fallbacks for indirect matches
+        if not is_logo and "logo" in src.lower():
+            is_logo = True
+        if not is_sig and "signature" in src.lower():
+            is_sig = True
+            
+        # Put in correct list
+        if is_barcode:
+            barcodes_found.append({'tag': tag, 'top': top_val})
+        elif is_qrcode:
+            qrcodes_found.append({'tag': tag, 'top': top_val})
+        elif is_sig:
+            signatures_found.append({'tag': tag, 'top': top_val})
+        elif is_logo or "logo" in tag.lower() or "logo" in src.lower():
+            logos_found.append({'tag': tag, 'top': top_val})
+            
+    # Sort all found tags by top coordinate (top-to-bottom)
+    barcodes_found.sort(key=lambda x: x['top'])
+    qrcodes_found.sort(key=lambda x: x['top'])
+    signatures_found.sort(key=lambda x: x['top'])
+    logos_found.sort(key=lambda x: x['top'])
+    
+    # Filter crop assets by category
+    barcode_crops = sorted([(k, v) for k, v in crops.items() if "barcode" in k.lower()], key=lambda x: x[0])
+    qrcode_crops = sorted([(k, v) for k, v in crops.items() if "qrcode" in k.lower() or "qr_code" in k.lower()], key=lambda x: x[0])
+    signature_crops = sorted([(k, v) for k, v in crops.items() if "signature" in k.lower()], key=lambda x: x[0])
+    logo_crops = sorted([(k, v) for k, v in crops.items() if "logo" in k.lower()], key=lambda x: x[0])
+    
+    # Perform sequential replacements for barcodes
+    for idx, item in enumerate(barcodes_found):
+        tag = item['tag']
+        crop_val = barcode_crops[idx][1] if idx < len(barcode_crops) else (barcode_crops[0][1] if barcode_crops else None)
+        if crop_val:
+            if crop_val.startswith('data:'): crop_val = crop_val.split(',')[1]
+            new_tag = re.sub(r'src=["\']([^"\']*)["\']', f'src="data:image/png;base64,{crop_val}"', tag, flags=re.IGNORECASE)
+            if 'data-editor-element' not in new_tag:
+                new_tag = new_tag.replace('<img', '<img data-editor-element="true"')
+            html_content = html_content.replace(tag, new_tag)
+            
+    # Perform sequential replacements for qrcodes
+    for idx, item in enumerate(qrcodes_found):
+        tag = item['tag']
+        crop_val = qrcode_crops[idx][1] if idx < len(qrcode_crops) else (qrcode_crops[0][1] if qrcode_crops else None)
+        if crop_val:
+            if crop_val.startswith('data:'): crop_val = crop_val.split(',')[1]
+            new_tag = re.sub(r'src=["\']([^"\']*)["\']', f'src="data:image/png;base64,{crop_val}"', tag, flags=re.IGNORECASE)
+            if 'data-editor-element' not in new_tag:
+                new_tag = new_tag.replace('<img', '<img data-editor-element="true"')
+            html_content = html_content.replace(tag, new_tag)
+            
+    # Perform sequential replacements for signatures
+    for idx, item in enumerate(signatures_found):
+        tag = item['tag']
+        crop_val = signature_crops[idx][1] if idx < len(signature_crops) else (signature_crops[0][1] if signature_crops else None)
+        if crop_val:
+            if crop_val.startswith('data:'): crop_val = crop_val.split(',')[1]
+            new_tag = re.sub(r'src=["\']([^"\']*)["\']', f'src="data:image/png;base64,{crop_val}"', tag, flags=re.IGNORECASE)
+            if 'data-editor-element' not in new_tag:
+                new_tag = new_tag.replace('<img', '<img data-editor-element="true"')
+            html_content = html_content.replace(tag, new_tag)
+            
+    # Perform sequential replacements for logos
+    for idx, item in enumerate(logos_found):
+        tag = item['tag']
+        crop_val = logo_crops[idx][1] if idx < len(logo_crops) else (logo_crops[0][1] if logo_crops else None)
+        if crop_val:
+            if crop_val.startswith('data:'): crop_val = crop_val.split(',')[1]
+            new_tag = re.sub(r'src=["\']([^"\']*)["\']', f'src="data:image/png;base64,{crop_val}"', tag, flags=re.IGNORECASE)
+            if 'data-editor-element' not in new_tag:
+                new_tag = new_tag.replace('<img', '<img data-editor-element="true"')
+            html_content = html_content.replace(tag, new_tag)
+            
+    # Also do standard string replaces for any remaining direct matches just in case
+    for k, v in crops.items():
+        if v:
+            if v.startswith('data:'): v = v.split(',')[1]
+            html_content = html_content.replace(f"{k.upper()}_PLACEHOLDER", f"data:image/png;base64,{v}")
+            html_content = html_content.replace(f"{k.upper()}_PLACEHOLDER_1", f"data:image/png;base64,{v}")
+            html_content = html_content.replace(f"{k.upper()}_1_PLACEHOLDER", f"data:image/png;base64,{v}")
+            
     return html_content
 
 
