@@ -126,23 +126,24 @@ import io
 import re
 import json
 import base64
-import imghdr
 from google import genai
 from google.genai import types
 from settings_routes import get_model_for_process, get_api_key
 
 
 def detect_media_type(image_bytes):
-    """Detect the actual image media type from raw bytes."""
-    img_type = imghdr.what(None, h=image_bytes)
-    type_map = {
-        'png':  'image/png',
-        'jpeg': 'image/jpeg',
-        'jpg':  'image/jpeg',
-        'gif':  'image/gif',
-        'webp': 'image/webp',
-    }
-    return type_map.get(img_type, 'image/png')  # default to png (PDF conversions are always PNG)
+    """Detect the actual image media type from raw bytes without external libraries."""
+    if not image_bytes:
+        return 'image/png'
+    if image_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if image_bytes.startswith(b'\xff\xd8'):
+        return 'image/jpeg'
+    if image_bytes.startswith(b'GIF87a') or image_bytes.startswith(b'GIF89a'):
+        return 'image/gif'
+    if image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[8:16]:
+        return 'image/webp'
+    return 'image/png'  # Default fallback
 
 
 def call_llm(process_name, prompt, system_instruction=None, image_bytes=None, response_mime_type="application/json"):
@@ -188,10 +189,11 @@ def call_gemini(model_id, api_key, prompt, system_instruction, image_bytes, medi
         contents.append(types.Part.from_bytes(data=image_bytes, mime_type=media_type))  # was hardcoded "image/jpeg"
     contents.append(types.Part.from_text(text=prompt))
 
-    config = types.GenerateContentConfig(
-        response_mime_type=response_mime_type,
-        temperature=0.0
-    )
+    config_args = {"temperature": 0.0}
+    if response_mime_type == "application/json":
+        config_args["response_mime_type"] = "application/json"
+
+    config = types.GenerateContentConfig(**config_args)
     if system_instruction:
         config.system_instruction = system_instruction
 

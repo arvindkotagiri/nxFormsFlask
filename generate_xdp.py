@@ -16,7 +16,7 @@ Role: Expert Adobe Forms Architect.
 Task: Convert the attached document image into a valid, well-structured Adobe XDP file. Use the provided HTML_DESIGN as the source of truth if available.
     
     HTML_DESIGN:
-    {request.form.get('html_design', 'Not provided')}
+    __HTML_DESIGN_PLACEHOLDER__
 
 Instructions:
 1. Identify all labels, fields (static and dynamic), and layout structures (containers, subforms) from the image.
@@ -77,10 +77,22 @@ def generate_xdp():
             PIL.Image.open(io.BytesIO(file_bytes)).convert("RGB").save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
 
+        # Clean html_design to prevent token size bloat and API crashes
+        html_design = request.form.get('html_design', '')
+        if html_design:
+            # Strip massive base64 image strings to prevent token bloat
+            html_design = re.sub(r'data:image/[^;]+;base64,[^"]+', 'IMAGE_PLACEHOLDER', html_design)
+            # Strip watermark image completely from XDP prompt (it is limited to HTML only)
+            html_design = re.sub(r'<img[^>]*id=["\']watermark-element["\'][^>]*>', '', html_design)
+        else:
+            html_design = 'Not provided'
+
+        prompt_with_html = PROMPT_XDP.replace("__HTML_DESIGN_PLACEHOLDER__", html_design)
+
         # Generate XDP
         raw_response = call_llm(
             process_name='xdp',
-            prompt=PROMPT_XDP,
+            prompt=prompt_with_html,
             image_bytes=img_bytes,
             response_mime_type="application/json"
         )
