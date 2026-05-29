@@ -601,6 +601,8 @@ def replicate_invoice():
 
         html_result = html_content
 
+        html_result = html_content
+
         # ── Build preview with sample values from the original image ─────────
         # The LLM analyses the image to extract current values, then we fill
         # the placeholders using the MAPPED field names (not the LLM's guesses).
