@@ -226,6 +226,10 @@ STRICT REQUIREMENTS:
 7. ASSETS: 
    - <img src="LOGO_PLACEHOLDER" style="position: absolute; ...">
    - <img src="SIGNATURE_PLACEHOLDER" style="position: absolute; ...">
+   - <img src="BARCODE_PLACEHOLDER" alt="Barcode" style="position: absolute; ..."> (Use BARCODE_PLACEHOLDER, or BARCODE_PLACEHOLDER_1, BARCODE_PLACEHOLDER_2 if there are multiple barcodes)
+   - <img src="QRCODE_PLACEHOLDER" alt="QR Code" style="position: absolute; ..."> (Use QRCODE_PLACEHOLDER, or QRCODE_PLACEHOLDER_1, QRCODE_PLACEHOLDER_2 if there are multiple QR codes)
+
+8. BARCODES & QR CODES: Do NOT represent barcodes as collections of individual line divs, and do NOT represent QR codes as collections of grid cells or table columns. You MUST represent them strictly as absolute-positioned `<img>` tags using BARCODE_PLACEHOLDER or QRCODE_PLACEHOLDER as their `src`.
 
 TEMPLATE FIELDS:
 Replace all dynamic text with {{fieldName}} while keeping the exact position and style of the original text.
@@ -283,10 +287,69 @@ def build_placeholder_prompt_block(field_mappings: dict) -> str:
     )
 
 
+def apply_asset_replacements(html_content, crops):
+    # Standard logo / signature fallback checks
+    logo_b64 = crops.get('logo')
+    sig_b64 = crops.get('signature')
+    
+    if logo_b64:
+        if logo_b64.startswith('data:'): logo_b64 = logo_b64.split(',')[1]
+        html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{logo_b64}")
+    if sig_b64:
+        if sig_b64.startswith('data:'): sig_b64 = sig_b64.split(',')[1]
+        html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{sig_b64}")
+
+    # General replacements for barcode, qrcode and numbered placeholders
+    for placeholder_key, base64_val in crops.items():
+        if not base64_val:
+            continue
+        if base64_val.startswith('data:'):
+            base64_val = base64_val.split(',')[1]
+            
+        upper_key = placeholder_key.upper()
+        placeholder_str = f"{upper_key}_PLACEHOLDER"
+        html_content = html_content.replace(placeholder_str, f"data:image/png;base64,{base64_val}")
+        
+        # Suffix handling
+        if "BARCODE" in upper_key:
+            num_suffix = upper_key.replace("BARCODE", "").strip("_")
+            if num_suffix:
+                html_content = html_content.replace(f"BARCODE_PLACEHOLDER_{num_suffix}", f"data:image/png;base64,{base64_val}")
+                html_content = html_content.replace(f"BARCODE_{num_suffix}_PLACEHOLDER", f"data:image/png;base64,{base64_val}")
+        elif "QRCODE" in upper_key:
+            num_suffix = upper_key.replace("QRCODE", "").strip("_")
+            if num_suffix:
+                html_content = html_content.replace(f"QRCODE_PLACEHOLDER_{num_suffix}", f"data:image/png;base64,{base64_val}")
+                html_content = html_content.replace(f"QRCODE_{num_suffix}_PLACEHOLDER", f"data:image/png;base64,{base64_val}")
+
+    # Broad fallbacks
+    if 'barcode' in crops:
+        bc_val = crops['barcode']
+        if bc_val.startswith('data:'): bc_val = bc_val.split(',')[1]
+        html_content = html_content.replace("BARCODE_PLACEHOLDER", f"data:image/png;base64,{bc_val}")
+        html_content = html_content.replace("BARCODE_PLACEHOLDER_1", f"data:image/png;base64,{bc_val}")
+    if 'barcode_1' in crops:
+        bc_val = crops['barcode_1']
+        if bc_val.startswith('data:'): bc_val = bc_val.split(',')[1]
+        html_content = html_content.replace("BARCODE_PLACEHOLDER", f"data:image/png;base64,{bc_val}")
+        
+    if 'qrcode' in crops:
+        qr_val = crops['qrcode']
+        if qr_val.startswith('data:'): qr_val = qr_val.split(',')[1]
+        html_content = html_content.replace("QRCODE_PLACEHOLDER", f"data:image/png;base64,{qr_val}")
+        html_content = html_content.replace("QRCODE_PLACEHOLDER_1", f"data:image/png;base64,{qr_val}")
+    if 'qrcode_1' in crops:
+        qr_val = crops['qrcode_1']
+        if qr_val.startswith('data:'): qr_val = qr_val.split(',')[1]
+        html_content = html_content.replace("QRCODE_PLACEHOLDER", f"data:image/png;base64,{qr_val}")
+
+    return html_content
+
+
 def crop_image_parts(pil_img, img_bytes):
     prompt_find_crops = """
-    Identify the bounding boxes for 'logo' and 'signature' in this document.
-    Return a JSON list of objects: {"field_name": "logo"|"signature", "box_2d": [ymin, xmin, ymax, xmax]}
+    Identify the bounding boxes for 'logo', 'signature', any barcodes, and any QR codes in this document.
+    Return a JSON list of objects: {"field_name": "logo"|"signature"|"barcode"|"barcode_1"|"barcode_2"|"qrcode"|"qrcode_1"|"qrcode_2", "box_2d": [ymin, xmin, ymax, xmax]}
     """
     try:
         res = call_llm(process_name='invoice', prompt=prompt_find_crops, image_bytes=img_bytes, response_mime_type="application/json")
@@ -409,25 +472,19 @@ def replicate_invoice():
             # Combine page blocks into a single wrapper
             combined_html = '<div class="multi-page-container" style="display: flex; flex-direction: column; gap: 20px; background: #f1f5f9; padding: 20px;">'
             for page_idx, p_html, p_img_bytes in page_htmls:
-                # Localize replacements for this specific page (like logos/signatures)
+                # Localize replacements for this specific page (like logos/signatures/barcodes/qrcodes)
                 local_html = p_html
                 
-                # Check for logo/signature crops on this page
-                p_logo_b64 = logo_b64
-                p_sig_b64 = signature_b64
+                # Crop logo, signature, barcode, qrcode from the page
+                pil_img_full = PIL.Image.open(io.BytesIO(p_img_bytes)).convert("RGB")
+                backend_crops = crop_image_parts(pil_img_full, p_img_bytes)
+                
+                # Override with manually updated crops from frontend if provided
+                if logo_b64: backend_crops['logo'] = logo_b64
+                if signature_b64: backend_crops['signature'] = signature_b64
 
-                if not p_logo_b64 or not p_sig_b64:
-                    pil_img_full = PIL.Image.open(io.BytesIO(p_img_bytes)).convert("RGB")
-                    backend_crops = crop_image_parts(pil_img_full, p_img_bytes)
-                    if not p_logo_b64: p_logo_b64 = backend_crops.get('logo')
-                    if not p_sig_b64: p_sig_b64 = backend_crops.get('signature')
-
-                if p_logo_b64:
-                    if p_logo_b64.startswith('data:'): p_logo_b64 = p_logo_b64.split(',')[1]
-                    local_html = local_html.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{p_logo_b64}")
-                if p_sig_b64:
-                    if p_sig_b64.startswith('data:'): p_sig_b64 = p_sig_b64.split(',')[1]
-                    local_html = local_html.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{p_sig_b64}")
+                # Apply all asset replacements dynamically
+                local_html = apply_asset_replacements(local_html, backend_crops)
 
                 combined_html += f"""
                 <div class="pdf-page-wrapper" data-page-index="{page_idx}" style="position: relative; width: 816px; height: 1056px; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); margin: 0 auto; page-break-after: always;">
@@ -524,31 +581,23 @@ def replicate_invoice():
         # Running a fuzzy replacement after-the-fact would risk corrupting the HTML.
         # ─────────────────────────────────────────────────────────────────────
 
-        # Handle logo / signature crops
-        print("[INFO] Processing logo and signature assets...", flush=True)
+        # Handle logo / signature / barcode / qrcode crops
+        print("[INFO] Processing logo, signature, barcode, and qrcode assets...", flush=True)
         logo_b64 = request.form.get('logo_b64')
         signature_b64 = request.form.get('signature_b64')
 
         if logo_b64: print("[INFO] Using provided logo from frontend", flush=True)
         if signature_b64: print("[INFO] Using provided signature from frontend", flush=True)
 
-        if not logo_b64 or not signature_b64:
-            print("[INFO] Missing assets from frontend, attempting backend cropping...", flush=True)
-            pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
-            backend_crops = crop_image_parts(pil_img_full, img_bytes)
-            if not logo_b64:
-                logo_b64 = backend_crops.get('logo')
-                if logo_b64: print("[SUCCESS] Backend found logo", flush=True)
-            if not signature_b64:
-                signature_b64 = backend_crops.get('signature')
-                if signature_b64: print("[SUCCESS] Backend found signature", flush=True)
+        pil_img_full = PIL.Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        backend_crops = crop_image_parts(pil_img_full, img_bytes)
+        
+        # Override with manual uploads from frontend if provided
+        if logo_b64: backend_crops['logo'] = logo_b64
+        if signature_b64: backend_crops['signature'] = signature_b64
 
-        if logo_b64:
-            if logo_b64.startswith('data:'): logo_b64 = logo_b64.split(',')[1]
-            html_content = html_content.replace('LOGO_PLACEHOLDER', f"data:image/png;base64,{logo_b64}")
-        if signature_b64:
-            if signature_b64.startswith('data:'): signature_b64 = signature_b64.split(',')[1]
-            html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{signature_b64}")
+        # Apply all asset replacements dynamically
+        html_content = apply_asset_replacements(html_content, backend_crops)
 
         html_result = html_content
 
