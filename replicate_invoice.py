@@ -550,6 +550,8 @@ def replicate_invoice():
             if signature_b64.startswith('data:'): signature_b64 = signature_b64.split(',')[1]
             html_content = html_content.replace('SIGNATURE_PLACEHOLDER', f"data:image/png;base64,{signature_b64}")
 
+        html_result = html_content
+
         # ── Build preview with sample values from the original image ─────────
         # The LLM analyses the image to extract current values, then we fill
         # the placeholders using the MAPPED field names (not the LLM's guesses).

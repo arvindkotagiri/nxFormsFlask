@@ -11,11 +11,13 @@ from generate_xdp import xdp_bp
 from settings_routes import settings_bp
 from printer_routes import printer_bp
 from api_master_routes import api_master_bp
+from image_retention_routes import image_retention_bp
 
 
 def create_app():
     app = Flask(__name__)
     CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+    app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max payload limit (fixes HTTP 413)
 
     # Register Blueprints
     app.register_blueprint(analyze_bp)
@@ -27,6 +29,7 @@ def create_app():
     app.register_blueprint(settings_bp)
     app.register_blueprint(printer_bp, url_prefix='/api')
     app.register_blueprint(api_master_bp, url_prefix='/api')
+    app.register_blueprint(image_retention_bp, url_prefix='/api')
 
 
     return app

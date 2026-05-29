@@ -36,6 +36,13 @@ def generate_zpl():
     dpi = int(request.form.get('dpi', 203))
     dpmm = 8 if dpi < 300 else 12
 
+    html_design = request.form.get('html_design', '')
+    if html_design:
+        # Strip massive base64 image strings to prevent token bloat
+        html_design = re.sub(r'data:image/[^;]+;base64,[^"]+', 'IMAGE_PLACEHOLDER', html_design)
+        # Strip watermark image completely from ZPL prompt (it is limited to HTML only)
+        html_design = re.sub(r'<img[^>]*id=["\']watermark-element["\'][^>]*>', '', html_design)
+
     if 'image' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -80,7 +87,7 @@ def generate_zpl():
         If an HTML_DESIGN is provided below, use it as the ABSOLUTE source of truth for positions, dimensions, and text content.
         
         HTML_DESIGN:
-        {request.form.get('html_design', 'Not provided')}
+        {html_design or 'Not provided'}
         
         SPECS:
         - Target DPI: {dpi} ({dpmm} dpmm)
@@ -106,6 +113,29 @@ def generate_zpl():
             CORRECT: ^FD{{CheckDate}}^FS
         """
 
+        def get_html_element_dimensions(html_str, field_name):
+            img_tags = re.findall(r'<img[^>]*>', html_str)
+            for tag in img_tags:
+                is_sig = 'signature' in tag.lower()
+                is_wm = 'watermark-element' in tag
+                
+                if field_name == 'signature' and not is_sig:
+                    continue
+                if field_name == 'logo' and (is_sig or is_wm):
+                    continue
+                    
+                w_match = re.search(r'width:\s*([0-9.]+)px', tag)
+                h_match = re.search(r'height:\s*([0-9.]+)px', tag)
+                if not w_match: w_match = re.search(r'width=["\']([0-9.]+)["\']', tag)
+                if not h_match: h_match = re.search(r'height=["\']([0-9.]+)["\']', tag)
+                
+                if w_match and h_match:
+                    try:
+                        return int(float(w_match.group(1))), int(float(h_match.group(1)))
+                    except:
+                        pass
+            return None
+
         def get_zpl_graphic(pil_img):
             pil_img = pil_img.convert("1")
             width, height = pil_img.size
@@ -121,6 +151,10 @@ def generate_zpl():
                 items = json.loads(res)
                 crops = {}
                 w, h = pil_img.size
+                
+                # Calculate physical scaling ratio from screen pixels (816px for a standard 8.5in wide sheet) to printer dots
+                scale_factor = (width_in * dpi) / 816.0
+                
                 for it in items:
                     box = it.get('box_2d')
                     if box:
@@ -128,9 +162,20 @@ def generate_zpl():
                         left, top = (xmin * w) / 1000, (ymin * h) / 1000
                         right, bottom = (xmax * w) / 1000, (ymax * h) / 1000
                         crop = pil_img.crop((left, top, right, bottom))
+                        
+                        # Rescale cropped graphics to match their exact display size in the HTML layout
+                        dims = get_html_element_dimensions(html_design, it['field_name'])
+                        if dims:
+                            target_w = int(dims[0] * scale_factor)
+                            target_h = int(dims[1] * scale_factor)
+                            if target_w > 0 and target_h > 0:
+                                crop = crop.resize((target_w, target_h), PIL.Image.Resampling.LANCZOS)
+                                
                         crops[it['field_name']] = get_zpl_graphic(crop)
                 return crops
-            except: return {}
+            except Exception as e:
+                print(f"[WARNING] crop_parts failed: {e}")
+                return {}
 
         zpl_blocks = []
         preview_zpls = []
