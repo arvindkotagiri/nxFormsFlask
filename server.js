@@ -16,6 +16,8 @@ import analyzeRoutes from './routes/analyze.js';
 import generateZplRoutes from './routes/generateZpl.js';
 import generateXdpRoutes from './routes/generateXdp.js';
 import replicateInvoiceRoutes from './routes/replicateInvoice.js';
+import referenceRoutes from './routes/referenceRoutes.js';
+import labelConfigRoutes, { initLabelConfigDb } from './routes/labelConfigRoutes.js';
 
 dotenv.config();
 
@@ -60,6 +62,8 @@ app.use('/', replicateInvoiceRoutes);
 app.use('/api', printerRoutes);
 app.use('/api', apiMasterRoutes);
 app.use('/api', imageRetentionRoutes);
+app.use('/api', referenceRoutes);
+app.use('/api', labelConfigRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -72,6 +76,7 @@ async function startServer() {
   try {
     await initSettingsDb();
     await initImageDb();
+    await initLabelConfigDb();
     
     app.listen(PORT, () => {
       console.log(`\n==================================================`);
